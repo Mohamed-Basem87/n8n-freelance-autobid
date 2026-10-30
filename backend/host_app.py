@@ -98,7 +98,7 @@ def _run_exclusive(func, *args, timeout=120):
 
 # Where the persistent Firefox profile, screenshots and portfolio images live.
 # Point DATA_DIR at any directory the service user can write to.
-DATA_DIR = Path(os.environ.get("LOKI_DATA_DIR", "/srv/docker/loki-playwright"))
+DATA_DIR = Path(os.environ.get("LOKI_DATA_DIR", "/opt/freelance-autobid/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 PROFILE = Path(os.environ.get("LOKI_PROFILE_DIR", DATA_DIR / "test-profile"))

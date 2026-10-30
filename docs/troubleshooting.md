@@ -82,14 +82,90 @@ If the floor looks wrong, the project page is the source of truth — read the m
 
 ## n8n side
 
-**`$env` expressions are empty** — set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` and restart n8n.
+**`$env` expressions are empty** — set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` and restart n8n. Confirm nothing else is shadowing the name: `docker exec <n8n> env | grep LOKI`.
 
-**`401 Unauthorized` from the backend** — the n8n header and `API_KEY` in `host-api.env` differ, or the n8n container cannot reach `LOKI_BACKEND_URL`. Test from inside the container:
+**`401 Unauthorized` from the backend** — two separate causes, easy to confuse:
+
+1. The key differs. `LOKI_API_KEY` in n8n must equal `API_KEY` in `host-api.env` exactly. Compare without printing the whole secret:
+   ```bash
+   grep '^API_KEY=' /opt/freelance-autobid/host-api.env | cut -d= -f2 | sha256sum
+   docker exec <n8n> printenv LOKI_API_KEY | sha256sum
+   ```
+2. The key is right but the request never arrives. `LOKI_BACKEND_URL` is resolved **inside the container**, where `localhost` is the container, not the host.
+
+**Connection refused / timeout**
+
+| n8n runs | use |
+|---|---|
+| on the host | `http://127.0.0.1:8000` |
+| Docker Desktop | `http://host.docker.internal:8000` |
+| Docker on Linux (bridge) | `http://172.17.0.1:8000` (`docker network inspect bridge`) |
+
+Test from inside the container, because that is the process that must connect:
 
 ```bash
-docker exec -it <n8n> wget -qO- http://host.docker.internal:8000/health
+docker exec -it <n8n> wget -qO- --header="Authorization: Bearer $LOKI_API_KEY" \
+  "$LOKI_BACKEND_URL/health"
 ```
 
-**The workflow runs but nothing is bid** — by design. Check both gates: `Submit Enabled?` in the workflow and `ALLOW_SUBMIT` in the env file. The `Telegram: Not Sent` alert tells you the gate is off and what price would have been used.
+**The workflow runs but nothing is bid** — by design, one of the gates is off:
+
+- `Submit Enabled?` false → you get `Telegram: Not Sent` with the price it would have used.
+- `ALLOW_SUBMIT=0` → the form is filled and validated and the Bid Result alert says `dry_run_prepared`, with a screenshot to inspect.
+
+Both must be on for a real bid.
+
+**Import shows unknown nodes or *Credential not found*** — the LangChain nodes are missing (old n8n, or a stripped image), or the credential reference survived an upgrade. Install/enable the LangChain nodes and re-import; then pick your credentials from each dropdown.
 
 **Same job twice** — there is no dedupe layer. A second run on the same project hits `already_bid` at the page level. If your feed repeats jobs aggressively, dedupe upstream.
+
+## Telegram says "chat not found"
+
+- The bot cannot start a conversation. Send it a message (or `/start`) first, then re-read the id.
+- Groups: the id is negative (`-100…`) and the bot must be a member, with privacy mode off or the message must mention it.
+- Channels: the bot must be an administrator.
+- Re-read the id from the source of truth:
+
+```bash
+curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" \
+  | python3 -c 'import json,sys; [print(u["message"]["chat"]["id"], u["message"]["chat"].get("title") or u["message"]["chat"].get("first_name")) for u in json.load(sys.stdin)["result"] if "message" in u]'
+```
+
+## The service is inactive or restarts in a loop
+
+```bash
+systemctl status freelance-autobid --no-pager
+journalctl -u freelance-autobid -n 60 --no-pager
+```
+
+| log line | cause |
+|---|---|
+| `address already in use` | another uvicorn holds port 8000 |
+| `KeyError: 'API_KEY'` | the env file is missing, unreadable, or not loaded |
+| `FileNotFoundError … firefox` | wrong `LOKI_FIREFOX_BINARY` |
+| `Permission denied … test-profile` | profile owned by another user |
+| `Failed to set preferences` | stale `lock`, see above |
+
+## A run hangs and blocks everything
+
+The service allows one browser at a time. A browser that never quits holds the lock, and every later call waits.
+
+```bash
+ps aux | grep -E 'firefox|geckodriver' | grep -v grep
+sudo systemctl restart freelance-autobid
+```
+
+If it repeats, check `/dev/shm` size — Firefox needs it, and small containers starve it:
+
+```bash
+df -h /dev/shm
+```
+
+## Disk fills up
+
+`data/test-profile` is ~340 MB and grows slowly; `data/screenshots` grows one file per attempt. Prune screenshots, keep the profile:
+
+```bash
+find /opt/freelance-autobid/data/screenshots -type f -mtime +30 -delete
+```
+
