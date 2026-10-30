@@ -19,8 +19,37 @@ fi
 
 echo "==> packages"
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip firefox-esr firefox-geckodriver \
-  >/dev/null
+apt-get install -y -qq python3 python3-venv python3-pip curl >/dev/null
+
+# Firefox. Debian ships firefox-esr; Ubuntu only has the snap, which is
+# confined and cannot reliably use a profile under /opt. Warn instead of
+# installing something that will not work.
+if command -v firefox-esr >/dev/null 2>&1; then
+  FIREFOX_BIN="$(command -v firefox-esr)"
+else
+  apt-get install -y -qq firefox-esr >/dev/null 2>&1 || true
+  if command -v firefox-esr >/dev/null 2>&1; then
+    FIREFOX_BIN="$(command -v firefox-esr)"
+  elif [[ -x /usr/bin/firefox && ! -L /usr/bin/firefox ]]; then
+    FIREFOX_BIN="/usr/bin/firefox"
+  else
+    echo "!! no usable Firefox found. Install firefox-esr (Debian) or the" >&2
+    echo "   official Mozilla tarball. The Ubuntu snap cannot use this profile." >&2
+    FIREFOX_BIN="/usr/bin/firefox-esr"
+  fi
+fi
+echo "    firefox: $FIREFOX_BIN"
+
+# geckodriver. Prefer the distro package; Selenium 4 downloads a matching
+# driver itself on first run if neither is available.
+if ! command -v geckodriver >/dev/null 2>&1; then
+  apt-get install -y -qq firefox-geckodriver >/dev/null 2>&1 || true
+fi
+if command -v geckodriver >/dev/null 2>&1; then
+  echo "    geckodriver: $(command -v geckodriver)"
+else
+  echo "    geckodriver: not installed, Selenium Manager will fetch it on first run"
+fi
 
 echo "==> service user"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
@@ -47,6 +76,9 @@ if [[ ! -f "$APP_DIR/host-api.env" ]]; then
   cp "$REPO_DIR/backend/host-api.env.example" "$APP_DIR/host-api.env"
   sed -i "s#^LOKI_DATA_DIR=.*#LOKI_DATA_DIR=$APP_DIR/data#" "$APP_DIR/host-api.env"
   sed -i "s#^API_KEY=.*#API_KEY=$(openssl rand -hex 32)#" "$APP_DIR/host-api.env"
+  if [[ "$FIREFOX_BIN" != "/usr/bin/firefox-esr" ]]; then
+    echo "LOKI_FIREFOX_BINARY=$FIREFOX_BIN" >> "$APP_DIR/host-api.env"
+  fi
   chmod 600 "$APP_DIR/host-api.env"
   chown "$APP_USER:$APP_USER" "$APP_DIR/host-api.env"
   echo "    generated $APP_DIR/host-api.env with a random API_KEY"
