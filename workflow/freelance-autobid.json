@@ -72,7 +72,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.LOKI_BACKEND_URL || 'http://172.23.0.1:8000' }}/resolve-tracking",
+        "url": "={{ $env.LOKI_BACKEND_URL || 'http://host.docker.internal:8000' }}/resolve-tracking",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -123,7 +123,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.LOKI_BACKEND_URL || 'http://172.23.0.1:8000' }}/prepare-offer",
+        "url": "={{ $env.LOKI_BACKEND_URL || 'http://host.docker.internal:8000' }}/prepare-offer",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -193,7 +193,7 @@
       ],
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.LOKI_BACKEND_URL || 'http://172.23.0.1:8000' }}/inspect",
+        "url": "={{ $env.LOKI_BACKEND_URL || 'http://host.docker.internal:8000' }}/inspect",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
