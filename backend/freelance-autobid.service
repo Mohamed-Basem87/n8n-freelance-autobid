@@ -1,0 +1,20 @@
+[Unit]
+Description=Freelance Auto-Bid host (Firefox + Selenium API)
+After=network.target
+
+[Service]
+Type=simple
+# Must be the user that owns the Firefox profile and is logged in on the sites.
+User=autobid
+Group=autobid
+WorkingDirectory=/opt/freelance-autobid
+EnvironmentFile=/opt/freelance-autobid/host-api.env
+# 0.0.0.0 lets n8n reach the service from a Docker network or another host.
+# Bind to a private interface instead if the machine is exposed.
+ExecStart=/opt/freelance-autobid/venv/bin/uvicorn host_app:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

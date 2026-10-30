@@ -1,0 +1,32 @@
+# secrets and local state
+*.env
+!*.env.example
+host-api.env
+*.bak
+*.bak-*
+.env
+
+# runtime output
+data/
+attachments/*.png
+attachments/*.jpg
+attachments/*.jpeg
+attachments/*.webp
+screenshots/
+test-profile/
+*.log
+
+# python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# scratch
+workflow/raw-export.json

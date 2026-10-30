@@ -1,0 +1,715 @@
+{
+  "name": "Freelance Auto-Bid (Mostaql + Nafezly)",
+  "nodes": [
+    {
+      "id": "537a340b-54d2-4899-a651-16a9c9a8a4c6",
+      "name": "Webhook",
+      "webhookId": "a3aaf9b2-fd43-430b-8bd2-7c26caa8d298",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -784,
+        -160
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "loki-job",
+        "options": {}
+      }
+    },
+    {
+      "id": "40a9126e-e4eb-4ce8-bf99-cc2a908f87ae",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1008,
+        -256
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ JSON.stringify($json) }}",
+        "options": {
+          "systemMessage": "You are a professional freelance application assistant working on behalf of the user. Your job is to evaluate freelance project postings, write personalized proposals, select an appropriate cost and duration, and prepare offers on Mostaql and Nafezly.\n\nYour goal is to produce high-quality, relevant, professional applications while following the rules below exactly.\n\n## 1. CORE RULES\n\n- Analyze the actual project description, requirements, deliverables, advertised budget, deadlines, and client instructions before preparing an offer.\n- Base your decisions on available project information and the user's actual skills and experience. Never invent qualifications, completed projects, client conversations, or technical abilities.\n- Keep the proposal, cost, and duration as separate values.\n- Never put the cost, price, budget, number of days, duration, deadline, payment terms, or pricing explanation inside the proposal.\n- Return cost and duration as separate structured fields so the automation can place them in the corresponding website form fields.\n- Never click a submit button, confirm an application, or perform any irreversible application action yourself. The automation fills and submits the offer after your JSON passes validation; you never do it.\n- Do not describe the offer as submitted, and do not describe the workflow as a dry run. Your only job is to judge eligibility and return the proposal, cost, and duration.\n\n## 2. PROPOSAL WRITING STYLE\n\nWrite proposals in natural, professional Arabic when the project is in Arabic. Use the language most appropriate to the project when it is in another language.\n\nUse this example as the reference for tone, structure, and level of detail:\n\n\"السلام عليكم يا أستاذ إسلام، أتمنى حضرتك تكون بخير. أقدر أنفذ لحضرتك تنظيف وتجهيز ملف البيانات باستخدام Microsoft Excel، بدايةً من مراجعة البيانات واكتشاف الأخطاء والتكرارات والقيم المفقودة، وإزالة المسافات الزائدة وتصحيح الأخطاء الإملائية في أسماء العملاء والمنتجات، وصولًا إلى توحيد تنسيقات التواريخ والأرقام ومعالجة القيم غير المتناسقة، مع التأكد من الحفاظ على دقة البيانات وسلامتها. لدي خبرة في التعامل مع البيانات وتنظيفها وتحليلها باستخدام Excel وPower Query وPower BI، وسأحرص على تسليم ملف منظم وخالٍ من الأخطاء وجاهز للاستخدام والتحليل، مع الالتزام بالمدة المطلوبة.\"\n\nTreat this as a style reference, not a template to copy verbatim.\n\nEvery proposal must follow these principles:\n\n1. Start with a polite, personalized greeting. Use the client's name or title only when it is actually available. Otherwise, use a natural general greeting.\n2. Briefly state that you can carry out the requested work confidently and professionally.\n3. Explain how you will execute the specific project from beginning to end. Include concrete steps, methods, tools, analyses, or deliverables relevant to the actual project.\n4. Mention only relevant skills and experience supported by the user's profile.\n5. End with a professional commitment to quality, accuracy, organization, and meeting the client's actual requirements.\n6. Keep the writing natural, direct, human-sounding, and concise. Avoid exaggerated marketing language, robotic wording, unnecessary headings, generic filler, and excessive promises.\n7. Adapt every proposal to the individual project. Never blindly reuse the example or mention irrelevant tools.\n8. Do not invent a client's name, project requirements, data availability, or deliverables.\n9. Do not include emojis unless the client explicitly requests them.\n10. Never mention the offer cost, price, advertised budget, duration, number of days, estimated deadline, payment terms, or pricing rationale in the proposal text. Even if the client specifies these details, they belong exclusively in the separate website form fields.\n11. Never leave a placeholder in the proposal. Do not write \"[اسمك]\", \"[Your Name]\", \"[your name]\" or any bracketed stand-in for the signature; sign with the freelancer's first name, or close without a signature.\n\n### Proposal length and content limits (hard requirements)\n\nThe website validates the proposal text itself. Text that breaks these limits is rejected by the form and the bid is lost.\n\n- Mostaql requires at least 200 characters and rejects anything shorter. Always write at least 300 characters, and normally 400 to 900.\n- Nafezly accepts shorter text, but never send fewer than 300 characters there either.\n- Never include a link, a URL, a domain name, an email address, or anything that looks like one. Mostaql blocks proposals containing \"http://\", \"https://\", \"www.\", \"name@domain.com\", and even a bare token such as \"word.com\", \"word.net\", \"word.io\", or \"word.co\".\n- When you mention previous work, name it in plain words (for example \"لوحة مبيعات مقهى\") instead of pointing at a link.\n- Do not include phone numbers, WhatsApp numbers, or any contact details. Communication stays inside the platform.\n- Do not use the characters \"<\" or \">\", markdown links, or headings.\n\n## 3. USER SKILLS AND EXPERIENCE\n\nThe user has experience and practical project exposure in:\n\n- Microsoft Excel, including Power Query, Power Pivot, and DAX.\n- Power BI dashboards, data modeling, reporting, and data analysis.\n- Python and SQL fundamentals.\n- Python data analysis with Pandas and NumPy for loading, cleaning, transforming, and exploring datasets, and Matplotlib and Seaborn for charts and visual analysis.\n- Data cleaning, data preparation, exploratory analysis, and turning data into useful insights.\n\nRelevant previous work includes sales and salesperson analysis dashboards, revenue and margin analysis, a coffee shop sales dashboard, and a Fitbit activity dashboard.\n\nUse these skills and projects only when relevant to the current job. Do not claim professional experience with a tool, framework, or technique that is not supported by this profile or other explicitly supplied information.\n\n## 4. COST SELECTION RULES\n\nChoose the cost independently from the proposal text. Determine it from the project's advertised budget and the platform's permitted offer limits.\n\n### When the client specifies a budget range\n\n- Select the lowest permitted offer amount that falls within the advertised budget range.\n- Do not automatically choose the platform minimum if it falls below the advertised range.\n- Do not automatically choose the upper end of the range.\n- Verify that the selected amount satisfies the platform's actual minimum and maximum limits.\n- If the lowest amount within the range is not permitted, choose the lowest amount that satisfies both the platform rules and the client's budget requirements.\n\nExample: if the advertised budget is $25–$50 and the platform permits an offer of $25, select $25. If the budget is $50–$100 and $50 is permitted, select $50.\n\n### When the client specifies a fixed price\n\n- Respect the exact price if the client explicitly requires that amount and the platform permits it.\n- Do not reinterpret a fixed-price requirement as a budget range.\n\n### When the client specifies only a maximum budget\n\n- Choose the lowest permitted amount consistent with the client's instructions, without exceeding the stated maximum.\n- Do not assume the maximum budget is the required offer amount.\n\n### When no budget is specified\n\n- Return the lowest standard offer amount for the platform: 10 USD on Nafezly. This is only a starting value, not the final price.\n- A missing advertised budget is normal and is never, by itself, a reason to return review_required.\n- The automation always raises the submitted amount to the project's real minimum when needed, so never guess a high price to compensate for an unknown budget.\n- Never put the amount, the word \"budget\", or any pricing note inside the proposal text.\n\n### When the budget conflicts with platform limits\n\n- If no valid amount satisfies the client's requirements and platform limits, set the job to review_required.\n- Do not invent a price, silently ignore the client's budget, or choose an invalid amount.\n- Do not raise or lower a price arbitrarily based on assumptions about what the client might accept.\n\nReturn the selected cost only in the dedicated numeric cost field. Never mention or explain it in the proposal.\n\n## 5. DURATION SELECTION RULES\n\nChoose the duration independently from the proposal text.\n\n- By default, select the shortest duration permitted by the platform that is reasonable for the project's actual scope.\n- Check the available duration options and platform constraints before selecting a value.\n- If the client explicitly specifies a required duration, respect it when possible and permitted.\n- If the client specifies a deadline date, do not confuse that date with a duration in days. Calculate or select a duration only when the available information supports doing so.\n- Do not select an unrealistically short duration merely to minimize the number of days.\n- If the requested duration is impossible, conflicts with the requirements, or cannot be interpreted reliably, set the job to review_required.\n- If no duration or deadline is specified, return 3 days. A missing duration is never, by itself, a reason to return review_required.\n\nReturn the duration only in the dedicated numeric period_days field. Never mention or explain it in the proposal.\n\n## 6. EXPLICIT CLIENT REQUIREMENTS\n\nClear, feasible client requirements take precedence over default cost and duration preferences.\n\n- Explicit fixed price: respect the specified price when the platform permits it.\n- Budget range: select the lowest permitted amount within the range.\n- Maximum budget only: select the lowest permitted amount consistent with the instructions and below the maximum.\n- Explicit deadline or duration: respect it when feasible and supported by available information.\n- Explicit price and deadline: handle each independently and respect both when possible.\n- No explicit price or deadline: use the lowest permitted reasonable cost and shortest permitted reasonable duration.\n- Conflicting, impossible, or insufficiently clear requirements: set the job to review_required rather than guessing.\n\nNever put the client's budget or deadline into the proposal text.\n\n## 7. STRUCTURED OUTPUT\n\nReturn the result in the exact structured format expected by the automation. The AI response must be valid JSON with these fields:\n\n- proposal: string containing the complete proposal text.\n- cost: numeric offer cost, not a quoted string.\n- period_days: integer duration in days.\n- status: \"eligible\" when the job is suitable for dry-run preparation, or \"review_required\" when it needs review.\n- reason: string explaining why review is needed; use an empty string when no review is needed.\n\nExample structure:\n\n{\n  \"proposal\": \"السلام عليكم، ...\",\n  \"cost\": 25,\n  \"period_days\": 2,\n  \"status\": \"eligible\",\n  \"reason\": \"\"\n}\n\nThis example illustrates the output format only. The values must be selected for the actual project.\n\nThe proposal field must contain only the proposal itself. Never append JSON labels, cost, duration, internal reasoning, or review notes to it.\n\nThe cost and period_days fields must contain only their respective numeric values.\n\nDo not include platform or URL in the AI output unless the existing automation explicitly requires them from the AI. Prefer preserving the actual platform and project URL from the incoming workflow data.\n\nIf the job cannot be evaluated safely, return status \"review_required\" and explain the reason.\n\n## 8. PROJECT ELIGIBILITY AND REVIEW\n\nBefore preparing an offer, determine whether the project appears open and whether its requirements are sufficiently clear.\n\nSet status to \"review_required\" when:\n\n- The project is closed, unavailable, or no longer accepting offers.\n- Required information is missing and cannot safely be inferred.\n- Client requirements are contradictory or impossible to satisfy.\n- Platform cost or duration constraints cannot be determined sufficiently to select valid values. A missing advertised budget or duration is not such a case: use the defaults above and let the automation clamp them.\n- The project requires qualifications or capabilities unsupported by the user's profile.\n- The website behaves unexpectedly or the offer form cannot be validated.\n\nIf the project is open, clearly within the user's data skills, and the only gaps are optional details such as an advertised budget or a deadline, do not choose review_required: apply the defaults above and let the automation clamp the values.\n\nDo not fabricate missing details to force a successful application.\n\n## 9. PLATFORM AND AUTOMATION SAFETY\n\nThe supported platforms for this workflow are Mostaql and Nafezly.\n\n- Follow the actual platform form requirements for cost and duration.\n- Do not assume the field names, currency conventions, minimum prices, or duration limits are identical across platforms.\n- Do not bypass authentication, access controls, platform restrictions, or validation.\n- Never click the submit button yourself and never try to send the application. The automation fills the form and submits it after your JSON output passes validation.\n- Do not claim success merely because a proposal was generated. Whether the offer actually landed is decided by the automation and reported separately.\n- If preparation fails, report the failure accurately and leave the offer unsubmitted.\n\n## 10. FINAL PRIORITIES\n\nApply these priorities in order:\n\n1. Safety and honesty: valid fields, no invented facts, and no submission performed by you.\n2. Explicit client requirements and platform constraints.\n3. Project eligibility and sufficient information.\n4. Lowest permitted cost consistent with the advertised budget and client instructions.\n5. Shortest reasonable permitted duration consistent with explicit deadlines.\n6. Personalized, project-specific proposal quality.\n\nAlways keep proposal writing separate from cost and duration selection. Return a clear, tailored proposal and send cost and duration only through their dedicated structured fields for the website automation."
+        }
+      }
+    },
+    {
+      "id": "21d943bc-398f-414b-b7d9-4572d496a33a",
+      "name": "Groq Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        -32
+      ],
+      "parameters": {
+        "model": "openai/gpt-oss-120b",
+        "options": {}
+      }
+    },
+    {
+      "id": "e29ef08f-bdce-42c3-881a-3c87cf369c26",
+      "name": "Parse Loki Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        -160
+      ],
+      "parameters": {
+        "jsCode": "\nconst data = $json.body ?? $json;\n\nconst text = String(\n  data.text ?? data.message ?? data.raw_text ?? \"\"\n);\n\nconst lines = text.split(\"\\n\").map(line => line.trim()).filter(Boolean);\nconst buttons = Array.isArray(data.buttons) ? data.buttons : [];\n\nconst platformAliases = {\n  mostaql: \"mostaql\",\n  \"مستقل\": \"mostaql\",\n  nafezly: \"nafezly\",\n  \"نفذلي\": \"nafezly\",\n  kafiil: \"kafiil\",\n  \"كفيل\": \"kafiil\",\n};\n\nconst allowedHosts = {\n  mostaql: [\"mostaql.com\", \"www.mostaql.com\"],\n  nafezly: [\"nafezly.com\", \"www.nafezly.com\"],\n  kafiil: [\"kafiil.com\", \"www.kafiil.com\"],\n};\n\nconst TRACKING_HOST = \"url-shortne.tail3d0151.ts.net\";\n\n// 1. Read the explicit platform first.\nconst rawPlatform = String(data.platform ?? \"\")\n  .trim()\n  .toLowerCase();\n\nlet platform = platformAliases[rawPlatform] ?? rawPlatform;\n\n// 2. If missing or unsupported, infer it from the notification text.\nconst platformText = `${text}\\n${String(data.description ?? \"\")}`;\n\nif (!allowedHosts[platform]) {\n  if (/\\bnafezly\\b|نفذلي/i.test(platformText)) {\n    platform = \"nafezly\";\n  } else if (/\\bmostaql\\b|مستقل/i.test(platformText)) {\n    platform = \"mostaql\";\n  } else if (/\\bkafiil\\b|كفيل/i.test(platformText)) {\n    platform = \"kafiil\";\n  }\n}\n\n// 3. Extract the job button URL first, then fall back to other fields.\nconst jobButton = buttons.find(button =>\n  /view job|عرض الوظيفة|عرض المشروع|view project/i.test(\n    String(button?.text ?? \"\")\n  ) && typeof button?.url === \"string\"\n);\n\nconst candidateUrl =\n  jobButton?.url ??\n  buttons.find(button => typeof button?.url === \"string\")?.url ??\n  data.url ??\n  data.original_tracking_url ??\n  data.resolved_url ??\n  null;\n\nlet jobUrl = null;\nlet urlType = \"invalid\";\n\nif (typeof candidateUrl === \"string\" && allowedHosts[platform]) {\n  const candidate = candidateUrl.trim();\n\n  // Accept only HTTPS URLs on the exact tracking hostname.\n  const trackingMatch = candidate.match(\n    /^https:\\/\\/url-shortne\\.tail3d0151\\.ts\\.net\\/[^/?#]+(?:\\?[^#]*)?(?:#.*)?$/i\n  );\n\n  if (trackingMatch) {\n    jobUrl = candidate;\n    urlType = \"tracking\";\n  } else {\n    // Validate direct platform URLs.\n    // NOTE: the Code node sandbox has no URL constructor (new URL throws\n    // ReferenceError), so the URL is validated with a regex instead.\n    const match = candidate.match(/^https:\\/\\/([^/?#]+)(?:[/?#]|$)/i);\n    const authority = match?.[1] ?? \"\";\n    const hostname = authority.replace(/:\\d+$/, \"\").toLowerCase();\n    const port = authority.match(/:(\\d+)$/)?.[1];\n\n    if (\n      match &&\n      !authority.includes(\"@\") &&\n      (!port || port === \"443\") &&\n      allowedHosts[platform].includes(hostname)\n    ) {\n      jobUrl = candidate;\n      urlType = \"platform\";\n    }\n  }\n}\n\n// 4. Extract title and description without losing the raw notification.\nconst title =\n  data.title ??\n  lines.find(line => !/^platform\\s*:/i.test(line)) ??\n  \"Untitled job\";\n\nconst description = data.description ?? text;\n\nreturn {\n  json: {\n    source: data.source ?? \"Loki\",\n    platform: allowedHosts[platform] ? platform : \"unknown\",\n    title,\n    description,\n    budget: data.budget ?? null,\n\n    url: jobUrl,\n    original_tracking_url: urlType === \"tracking\" ? jobUrl : null,\n    resolved_url: urlType === \"platform\" ? jobUrl : null,\n\n    url_type: urlType,\n    ready_for_inspection: Boolean(jobUrl),\n    requires_resolution: urlType === \"tracking\",\n\n    raw_text: text,\n    buttons,\n    telegram_chat_id: data.telegram_chat_id ?? null,\n    telegram_message_id: data.telegram_message_id ?? null,\n    received_at: new Date().toISOString(),\n  },\n};\n"
+      }
+    },
+    {
+      "id": "1b3c1b48-caf8-4125-ac96-38c27f47ea68",
+      "name": "Resolve Tracking URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        336,
+        -512
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LOKI_BACKEND_URL || 'http://172.23.0.1:8000' }}/resolve-tracking",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.LOKI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "platform",
+              "value": "={{ $json.platform }}"
+            },
+            {
+              "name": "url",
+              "value": "={{ $json.url }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "3bacec35-a2ae-463e-84a2-731819c87aed",
+      "name": "Parse Application Proposal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        -256
+      ],
+      "parameters": {
+        "jsCode": "// Parse the AI Agent's JSON string and preserve the original job context.\n\nconst aiRaw = $node[\"AI Agent\"].json.output;\n\nlet ai;\ntry {\n  ai = typeof aiRaw === \"string\" ? JSON.parse(aiRaw) : aiRaw;\n} catch (error) {\n  return [{\n    json: {\n      status: \"review_required\",\n      submitted: false,\n      reason: \"AI output was not valid JSON: \" + error.message,\n    }\n  }];\n}\n\n// Recover project context from the earlier workflow nodes.\nconst parsedJob = $node[\"Parse Loki Notification\"].json;\n\n// \"Resolve Tracking URL\" and \"Trim Job Context\" only run on their own branches,\n// so read them defensively instead of throwing \"node has not been executed\".\nconst readUpstream = (name) => {\n  try {\n    const node = $(name);\n    return node.isExecuted ? (node.first().json ?? {}) : {};\n  } catch {\n    return {};\n  }\n};\n\nconst resolvedJob = readUpstream(\"Resolve Tracking URL\");\nconst trimmedJob = readUpstream(\"Trim Job Context\");\n\n// Find platform and URL from the available earlier data.\nconst platform =\n  parsedJob.platform ??\n  resolvedJob.platform ??\n  null;\n\nconst url =\n  resolvedJob.final_url ??\n  resolvedJob.url ??\n  trimmedJob.final_url ??\n  parsedJob.url ??\n  parsedJob.project_url ??\n  null;\n\nconst proposal = ai.proposal;\nconst cost = Number(ai.cost);\nconst periodDays = Number(ai.period_days);\n\nconst valid =\n  typeof proposal === \"string\" &&\n  proposal.trim().length > 0 &&\n  Number.isFinite(cost) &&\n  Number.isInteger(periodDays) &&\n  periodDays > 0 &&\n  cost > 0 &&\n  [\"mostaql\", \"nafezly\"].includes(String(platform).toLowerCase()) &&\n  typeof url === \"string\" &&\n  url.startsWith(\"https://\");\n\nif (!valid) {\n  return [{\n    json: {\n      status: \"review_required\",\n      submitted: false,\n      reason: \"Missing or invalid required fields after parsing AI output.\",\n      missing: {\n        proposal: !(typeof proposal === \"string\" && proposal.trim()),\n        cost: !(Number.isFinite(cost) && cost > 0),\n        period_days: !(Number.isInteger(periodDays) && periodDays > 0),\n        platform: ![\"mostaql\", \"nafezly\"].includes(String(platform).toLowerCase()),\n        url: !(typeof url === \"string\" && url.startsWith(\"https://\")),\n      },\n      platform,\n      url,\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    status: [\"eligible\", \"ready\"].includes(ai.status)\n  ? \"eligible\"\n  : \"review_required\",\n    submitted: false,\n    reason: ai.reason || \"\",\n    platform: String(platform).toLowerCase(),\n    url,\n    proposal: proposal.trim(),\n    cost,\n    period_days: periodDays,\n    project_title:\n      trimmedJob.title ?? parsedJob.title ?? parsedJob.project_title ?? resolvedJob.project_title ?? \"\",\n  }\n}];"
+      }
+    },
+    {
+      "id": "0b70e626-7501-40fb-89ee-a33f3255870d",
+      "name": "Prepare Offer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "onError": "continueErrorOutput",
+      "position": [
+        2032,
+        -448
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LOKI_BACKEND_URL || 'http://172.23.0.1:8000' }}/prepare-offer",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.LOKI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "platform",
+              "value": "={{ $json.platform }}"
+            },
+            {
+              "name": "url",
+              "value": "={{ $json.url }}"
+            },
+            {
+              "name": "period",
+              "value": "={{ Number($json.period_days) }}"
+            },
+            {
+              "name": "cost",
+              "value": "={{ Number($json.cost) }}"
+            },
+            {
+              "name": "offer_description",
+              "value": "={{ $json.proposal }}"
+            },
+            {
+              "name": "submit",
+              "value": "={{ true }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "6c98fecd-992a-4c0b-a15d-edf012409f9e",
+      "name": "Trim Job Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        784,
+        -256
+      ],
+      "parameters": {
+        "jsCode": "const j = $json;\n\nconst pageText = String(j.page_text ?? '');\nconst title = String(j.title_from_loki ?? j.page_title ?? '');\nconst description = String(j.description_from_loki ?? '');\n\n// Normalize Arabic-Indic digits into standard digits.\nconst normalizeDigits = (value) =>\n  String(value)\n    .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))\n    .replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));\n\nconst lines = normalizeDigits(pageText)\n  .split(/\\r?\\n/)\n  .map(line => line.trim())\n  .filter(Boolean);\n\n// Find the budget label and its nearby value.\nconst budgetLabel = /^(الميزانية|ميزانية المشروع|budget|project budget)\\s*[:：]?$/i;\n\nlet budgetText = null;\nlet budgetLineIndex = -1;\n\nfor (let i = 0; i < lines.length; i++) {\n  if (budgetLabel.test(lines[i])) {\n    budgetLineIndex = i;\n\n    // Usually the value is on the next line.\n    budgetText = lines[i + 1] ?? null;\n\n    // If the label and value share a line, capture the value.\n    if (!budgetText && /[:：]/.test(lines[i])) {\n      budgetText = lines[i].split(/[:：]/).slice(1).join(':').trim() || null;\n    }\n\n    break;\n  }\n}\n\n// Parse the numeric range only when the value clearly contains one.\nlet budgetMin = null;\nlet budgetMax = null;\nlet budgetType = 'unspecified';\n\nif (budgetText) {\n  const value = budgetText.replace(/,/g, '');\n  const numbers = value.match(/\\d+(?:\\.\\d+)?/g) || [];\n\n  if (numbers.length >= 2 && /[-–—]/.test(value)) {\n    budgetMin = Number(numbers[0]);\n    budgetMax = Number(numbers[1]);\n    budgetType = 'range';\n  } else if (numbers.length === 1) {\n    const n = Number(numbers[0]);\n\n    if (/[<>≤≥]|(?:up to|maximum|max\\.?|حتى|بحد أقصى)/i.test(value)) {\n      budgetMax = n;\n      budgetType = 'maximum';\n    } else {\n      budgetMin = n;\n      budgetMax = n;\n      budgetType = 'fixed';\n    }\n  }\n}\n\n// Keep the budget section in the context even if it appears late on the page.\nconst budgetContext = budgetLineIndex >= 0\n  ? lines.slice(budgetLineIndex, budgetLineIndex + 3).join('\\n')\n  : 'Budget not found in inspected page text.';\n\nconst compact = {\n  platform: j.platform,\n  title,\n  description,\n  page_title: j.page_title,\n  final_url: j.final_url,\n\n  budget_text: budgetText,\n  budget_min: budgetMin,\n  budget_max: budgetMax,\n  budget_type: budgetType,\n  budget_context: budgetContext,\n\n  page_text: pageText.slice(0, 5000),\n};\n\nreturn { json: compact };"
+      }
+    },
+    {
+      "id": "a6b505e4-e138-47df-984a-17fdef1043ec",
+      "name": "Inspect Job Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        560,
+        -256
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.LOKI_BACKEND_URL || 'http://172.23.0.1:8000' }}/inspect",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.LOKI_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "platform",
+              "value": "={{ $('Parse Loki Notification').first().json.platform }}"
+            },
+            {
+              "name": "url",
+              "value": "={{ $json.final_url || $json.resolved_url || $json.url }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $('Parse Loki Notification').first().json.title }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $('Parse Loki Notification').first().json.description }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e75df504-cde5-49fd-a9ca-c935b187e4b7",
+      "name": "Classify URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        -512
+      ],
+      "parameters": {
+        "jsCode": "const j = $json;\n\nconst rawUrl = String(j.url ?? '').trim();\n\n// The Code node sandbox has no URL constructor (new URL throws\n// ReferenceError), so the URL is parsed with a regex instead.\nconst authorityMatch = rawUrl.match(/^https:\\/\\/([^/?#]+)(?:[/?#]|$)/i);\nconst authority = authorityMatch?.[1] ?? '';\nconst host = authority.replace(/:\\d+$/, '').toLowerCase();\nconst port = authority.match(/:(\\d+)$/)?.[1];\n\nif (\n  !authorityMatch ||\n  !host ||\n  authority.includes('@') ||\n  (port && port !== '443')\n) {\n  return {\n    json: {\n      ...j,\n      url_type: 'invalid',\n      ready_for_inspection: false,\n      requires_resolution: false,\n      routing_error: 'Invalid or missing URL',\n    },\n  };\n}\n\n// Accept only HTTPS URLs on the supported project platforms.\nconst isMostaql =\n  host === 'mostaql.com' || host.endsWith('.mostaql.com');\n\nconst isNafezly =\n  host === 'nafezly.com' || host.endsWith('.nafezly.com');\n\nif (isMostaql || isNafezly) {\n  const platform = isMostaql ? 'mostaql' : 'nafezly';\n\n  // The direct URL is already the project URL.\n  return {\n    json: {\n      ...j,\n      platform,\n      url: rawUrl,\n      original_tracking_url: rawUrl,\n      resolved_url: rawUrl,\n      url_type: 'direct',\n      requires_resolution: false,\n      ready_for_inspection: true,\n    },\n  };\n}\n\n// Only explicitly recognized tracking links should reach the resolver.\n// Add other legitimate shortener hosts here if Loki uses them.\nconst knownTrackingHosts = new Set([\n  'url-shortne.tail3d0151.ts.net',\n]);\n\nif (knownTrackingHosts.has(host)) {\n  return {\n    json: {\n      ...j,\n      original_tracking_url: rawUrl,\n      url_type: 'tracking',\n      requires_resolution: true,\n      ready_for_inspection: true,\n    },\n  };\n}\n\nreturn {\n  json: {\n    ...j,\n    url_type: 'unknown',\n    requires_resolution: false,\n    ready_for_inspection: false,\n    routing_error: `Unrecognized URL host: ${host}`,\n  },\n};"
+      }
+    },
+    {
+      "id": "b73c01ec-122b-43bf-b033-ca0360808c6a",
+      "name": "Has Job URL?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        -336,
+        -160
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "5dbd656c-c44e-4813-be1b-6ba8d76a7878",
+              "leftValue": "={{ $json.ready_for_inspection }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5a11b9e2-e0e1-4cba-badf-0fbed8bdfa07",
+      "name": "Stop: No Job URL",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        -112,
+        -64
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "c1f4a2d8-6f3e-4b1a-9d2e-7a5c0b8e4f61",
+      "name": "Eligible?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1584,
+        -256
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "8f2b7c14-3d9a-4e6b-b1c5-2a7d9e0f4c83",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "eligible",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "d4e8b1a6-2c7f-4a93-8e5d-1f6b3c9a7e02",
+      "name": "Stop: Not Eligible",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1808,
+        -64
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "a2f6c9d4-7b31-4e58-8c0a-3d95e1f7b642",
+      "name": "Submit Enabled?",
+      "notes": "Off = every eligible job stops here. To bid for real, set the left value to ={{ true }} AND set ALLOW_SUBMIT=1 on the host.",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        1808,
+        -352
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "b7c3d2e1-4a8f-4c6b-9d21-5e0f8a3c7b64",
+              "leftValue": "={{ false }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e9d4a7c2-5f18-4b6e-a3d7-8c20f1b5e946",
+      "name": "Stop: Submit Disabled",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2032,
+        -256
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "f00d0000-0000-4000-8000-000000000001",
+      "name": "Telegram: Bid Result",
+      "webhookId": "fa6807bb-cce1-4eb5-9c1a-3a1e0864911b",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "continueOnFail": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        2256,
+        -544
+      ],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=<b>BID RESULT:</b> {{ String(($json.status) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Job:</b> {{ String((String(($('Inspect Job Page').first().json.page_title) ?? '').split(' | ')[0] || String(($('Parse Application Proposal').first().json.project_title) ?? '') || 'Untitled') ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>URL:</b> {{ String(($('Parse Application Proposal').first().json.url) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Platform:</b> {{ String(($('Parse Application Proposal').first().json.platform) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Price:</b> {{ $json.cost_usd || $('Parse Application Proposal').first().json.cost }}{{ $json.floor_adjusted ? ' (raised from ' + $json.requested_cost + ' to the project minimum)' : '' }}\n<b>Period:</b> {{ $json.period_days || $('Parse Application Proposal').first().json.period_days }} days\n{{ $json.reason ? '<b>Reason:</b> ' + String(($json.reason) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') : '' }}\n{{ $json.confirmation ? '<b>Confirmation:</b> ' + String(($json.confirmation) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') : '' }}\n<b>Proposal:</b>\n{{ String((String($('Parse Application Proposal').first().json.proposal || '').slice(0, 2000)) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Screenshot:</b> {{ String(($json.screenshot || 'n/a') ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    },
+    {
+      "id": "f00d0000-0000-4000-8000-000000000002",
+      "name": "Telegram: Error",
+      "webhookId": "9496eb04-42ad-4f9a-804b-3c737948480a",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "continueOnFail": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        2256,
+        -352
+      ],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=<b>BID REQUEST FAILED</b>\n<b>Job:</b> {{ String((String(($('Inspect Job Page').first().json.page_title) ?? '').split(' | ')[0] || String(($('Parse Application Proposal').first().json.project_title) ?? '') || 'Untitled') ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>URL:</b> {{ String(($('Parse Application Proposal').first().json.url) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Platform:</b> {{ String(($('Parse Application Proposal').first().json.platform) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Error:</b> {{ String((($json.error && $json.error.message) || $json.message || 'unknown') ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Proposal:</b>\n{{ String((String($('Parse Application Proposal').first().json.proposal || '').slice(0, 2000)) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    },
+    {
+      "id": "f00d0000-0000-4000-8000-000000000003",
+      "name": "Telegram: Skipped",
+      "webhookId": "b6df7188-7716-40a3-a8e3-b73245833e80",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "continueOnFail": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        2032,
+        -64
+      ],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=<b>NOT BID: job skipped</b>\n<b>Job:</b> {{ String((String(($('Inspect Job Page').first().json.page_title) ?? '').split(' | ')[0] || String(($('Parse Application Proposal').first().json.project_title) ?? '') || 'Untitled') ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>URL:</b> {{ String(($('Parse Loki Notification').first().json.url || 'no url') ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Inspected page:</b> {{ String(($('Inspect Job Page').first().json.page_title || 'n/a') ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n{{ /just a moment|attention required|checking your browser|performing security verification|verify you are human/i.test(String(($('Inspect Job Page').first().json.page_title || '') ?? '')) ? '<b>Blocked:</b> the site served a bot check, so the AI never saw the real job. Nothing was bid.' : '<b>Reason:</b> ' + String(($json.reason || 'AI did not mark the job eligible') ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    },
+    {
+      "id": "05f21723-3224-4ccc-8a58-0a458ea79c63",
+      "name": "Requires Resolution?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        -112,
+        -256
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "a53d94c4-d773-44ca-a04f-f036c773af2a",
+              "leftValue": "={{ $json.requires_resolution }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "182271fc-1c9d-4553-8cf7-7dee1f71f85b",
+      "name": "Telegram: Not Sent",
+      "webhookId": "fa6807bb-cce1-4eb5-9c1a-3a1e0864911b",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "continueOnFail": true,
+      "onError": "continueRegularOutput",
+      "position": [
+        2272,
+        -136
+      ],
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=<b>BID NOT SENT</b> - submit gate is off\n<b>Job:</b> {{ String((String(($('Inspect Job Page').first().json.page_title) ?? '').split(' | ')[0] || String(($('Parse Application Proposal').first().json.project_title) ?? '') || 'Untitled') ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>URL:</b> {{ String(($('Parse Application Proposal').first().json.url || $('Parse Loki Notification').first().json.url) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Platform:</b> {{ String(($('Parse Application Proposal').first().json.platform) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Price that would be bid:</b> {{ String(($('Parse Application Proposal').first().json.cost) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n<b>Period:</b> {{ String(($('Parse Application Proposal').first().json.period_days) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }} days\n<b>Proposal:</b>\n{{ String((String($('Parse Application Proposal').first().json.proposal || '').slice(0, 2000)) ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;') }}\n\nNothing was submitted. Flip <b>Submit Enabled?</b> (and ALLOW_SUBMIT on the host) to bid this.",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "appendAttribution": false
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Loki Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Loki Notification": {
+      "main": [
+        [
+          {
+            "node": "Has Job URL?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Tracking URL": {
+      "main": [
+        [
+          {
+            "node": "Inspect Job Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Application Proposal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Application Proposal": {
+      "main": [
+        [
+          {
+            "node": "Eligible?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trim Job Context": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Inspect Job Page": {
+      "main": [
+        [
+          {
+            "node": "Trim Job Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify URL": {
+      "main": [
+        [
+          {
+            "node": "Resolve Tracking URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Job URL?": {
+      "main": [
+        [
+          {
+            "node": "Requires Resolution?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop: No Job URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Eligible?": {
+      "main": [
+        [
+          {
+            "node": "Submit Enabled?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop: Not Eligible",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Enabled?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Offer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop: Submit Disabled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Offer": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Bid Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Telegram: Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stop: Not Eligible": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Skipped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requires Resolution?": {
+      "main": [
+        [
+          {
+            "node": "Classify URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Inspect Job Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stop: Submit Disabled": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Not Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "pinData": {}
+}

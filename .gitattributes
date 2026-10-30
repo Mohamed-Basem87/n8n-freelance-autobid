@@ -1,0 +1,14 @@
+# Shell scripts and Python must keep LF, otherwise bash breaks on Linux.
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.py    text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.env   text eol=lf
+*.example text eol=lf
+
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
