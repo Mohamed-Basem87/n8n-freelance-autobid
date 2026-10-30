@@ -61,7 +61,7 @@ Both must be on. With either off, the service still fills and validates the form
 ### 1. Backend
 
 ```bash
-git clone https://github.com/<you>/n8n-freelance-autobid.git
+git clone https://github.com/Mohamed-Basem87/n8n-freelance-autobid.git
 cd n8n-freelance-autobid
 sudo ./deploy/install.sh
 ```
