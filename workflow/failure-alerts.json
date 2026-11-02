@@ -1,0 +1,78 @@
+{
+  "name": "Freelance Auto-Bid - Failure Alerts",
+  "nodes": [
+    {
+      "id": "c0e10000-0000-4000-8000-000000000001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "c0e10000-0000-4000-8000-000000000002",
+      "name": "Format Failure Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "\nconst d = $input.first().json ?? {};\nconst ex = d.execution ?? {};\nconst wf = d.workflow ?? {};\nconst err = ex.error ?? {};\n\nconst esc = (v) => String(v ?? '')\n  .replaceAll('&', '&amp;')\n  .replaceAll('<', '&lt;')\n  .replaceAll('>', '&gt;');\nconst clip = (v, n) => {\n  const s = String(v ?? '').trim();\n  return s.length > n ? s.slice(0, n) + '…' : s;\n};\n\nconst execId = ex.id ?? '';\nconst lines = [\n  '⚠️ <b>WORKFLOW FAILED</b>',\n  `<b>Workflow:</b> ${esc(wf.name || 'unknown')}`,\n  `<b>Failed node:</b> ${esc(ex.lastNodeExecuted || 'unknown')}`,\n  `<b>Error:</b> ${esc(clip(err.message || 'unknown error', 400))}`,\n];\nif (ex.mode) lines.push(`<b>Mode:</b> ${esc(ex.mode)}`);\nlines.push(`<b>Execution:</b> ${esc(execId || 'n/a')}`);\nif (ex.url) lines.push(`<b>Open:</b> ${esc(ex.url)}`);\nconst stack = clip(err.stack || '', 600);\nif (stack) lines.push(`<b>Stack:</b>\\n<pre>${esc(stack)}</pre>`);\n\nreturn [{ json: { text: lines.join('\\n') } }];\n"
+      }
+    },
+    {
+      "id": "c0e10000-0000-4000-8000-000000000003",
+      "name": "Telegram: Failure Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        540,
+        0
+      ],
+      "continueOnFail": true,
+      "onError": "continueRegularOutput",
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Format Failure Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Failure Alert": {
+      "main": [
+        [
+          {
+            "node": "Telegram: Failure Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

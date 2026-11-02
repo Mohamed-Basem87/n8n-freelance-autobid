@@ -13,6 +13,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from starlette.concurrency import run_in_threadpool
@@ -496,21 +497,21 @@ def validate_url(platform, url):
 
 
 SUBMIT_SUCCESS_MARKERS = (
-    "ØªÙ… Ø¥Ø±Ø³Ø§Ù„ Ø¹Ø±Ø¶Ùƒ",
-    "ØªÙ… Ø§Ø±Ø³Ø§Ù„ Ø¹Ø±Ø¶Ùƒ",
-    "ØªÙ… ØªÙ‚Ø¯ÙŠÙ… Ø¹Ø±Ø¶Ùƒ",
-    "ØªÙ… Ø¥Ø¶Ø§ÙØ© Ø¹Ø±Ø¶Ùƒ",
-    "Ø¹Ø±Ø¶Ùƒ Ø¨Ù†Ø¬Ø§Ø­",
+    "تم إرسال عرضك",
+    "تم ارسال عرضك",
+    "تم تقديم عرضك",
+    "تم إضافة عرضك",
+    "عرضك بنجاح",
 )
 
 SUBMIT_ERROR_MARKERS = (
-    "Ø§Ù„Ø­Ø¯ Ø§Ù„Ø£Ø¯Ù†Ù‰",
-    "Ø£Ù‚Ù„ Ù…Ù† Ø§Ù„Ø­Ø¯",
-    "Ù‚ÙŠÙ…Ø© Ø§Ù„Ø¹Ø±Ø¶",
-    "Ù„Ø§ ÙŠÙ…ÙƒÙ†",
-    "Ø®Ø·Ø£",
-    "Ø¹Ø°Ø±Ø§Ù‹",
-    "Ø¹Ø°Ø±Ø§",
+    "الحد الأدنى",
+    "أقل من الحد",
+    "قيمة العرض",
+    "لا يمكن",
+    "خطأ",
+    "عذراً",
+    "عذرا",
 )
 
 
@@ -1069,7 +1070,7 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
                     snippet = driver.find_element("tag name", "body").text[:4000]
                 except Exception:
                     snippet = ""
-                if "Ù„Ø§ ÙŠÙ…ÙƒÙ†Ùƒ ØªÙ‚Ø¯ÙŠÙ… Ø§Ù„Ù…Ø²ÙŠØ¯ Ù…Ù† Ø§Ù„Ø¹Ø±ÙˆØ¶" in snippet:
+                if "لا يمكنك تقديم المزيد من العروض" in snippet:
                     reason = (
                         "The bid form is absent and the page says no more bids "
                         "can be submitted right now (platform bid limit), so "
@@ -1107,7 +1108,7 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
 
         page_text = driver.find_element("tag name", "body").text
 
-        if "Ù…ÙØªÙˆØ­" not in page_text:
+        if "مفتوح" not in page_text:
             screenshot = SCREENSHOTS / "mostaql-project-review-required.png"
             driver.save_screenshot(str(screenshot))
             return {
@@ -1362,14 +1363,39 @@ def inspect_with_firefox(url, platform, title, description):
     try:
         driver.set_page_load_timeout(45)
         response = {"status": "opened"}
-        driver.get(url)
-        WebDriverWait(driver, 15).until(
-            lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
-        )
+        try:
+            driver.get(url)
+        except TimeoutException:
+            # Heavy pages (Cloudflare interstitials, trackers, big images) can
+            # blow the navigation budget while the DOM is already usable. Stop
+            # loading and retry once before deciding the page is really dead.
+            try:
+                driver.execute_script("window.stop()")
+            except Exception:
+                pass
+            time.sleep(2)
+            try:
+                driver.get(url)
+            except TimeoutException:
+                try:
+                    driver.execute_script("window.stop()")
+                except Exception:
+                    pass
+        try:
+            WebDriverWait(driver, 15).until(
+                lambda d: d.execute_script("return document.readyState") in ("interactive", "complete")
+            )
+        except TimeoutException:
+            pass
         challenge_passed, challenge_wait = _wait_for_challenge(driver)
         screenshot = SCREENSHOTS / f"inspect-{platform}.png"
         driver.save_screenshot(str(screenshot))
         body = driver.find_element("tag name", "body").text
+        if not body.strip() and not driver.title.strip():
+            raise HTTPException(
+                status_code=502,
+                detail="Page did not load after one navigation retry",
+            )
 
         page_structure = driver.execute_script("""
             const describe = el => ({
@@ -1477,20 +1503,20 @@ async def prepare_offer(
     validate_url(platform, request.url)
 
     if not 1 <= request.period <= 90:
-        raise HTTPException(status_code=400, detail="Period must be 1â€“90 days")
+        raise HTTPException(status_code=400, detail="Period must be 1–90 days")
 
     # Broad sanity limits only. The workflow must select a cost
     # consistent with the individual project's advertised budget.
     if platform == "nafezly" and not 1 <= request.cost <= 10000:
-        raise HTTPException(status_code=400, detail="Nafezly cost must be $1â€“$10,000")
+        raise HTTPException(status_code=400, detail="Nafezly cost must be $1–$10,000")
     if platform == "mostaql" and not 5 <= request.cost <= 10000:
-        raise HTTPException(status_code=400, detail="Mostaql cost must be $5â€“$10,000")
+        raise HTTPException(status_code=400, detail="Mostaql cost must be $5–$10,000")
 
     proposal = request.offer_description.strip()
     if not 30 <= len(proposal) <= 5000:
         raise HTTPException(
             status_code=400,
-            detail="Proposal must contain 30â€“5,000 characters",
+            detail="Proposal must contain 30–5,000 characters",
         )
 
     # Fail before the browser opens, the same way the site would fail after
@@ -1613,20 +1639,32 @@ def resolve_tracking_url(platform, url):
             headers={"User-Agent": "Loki-TrackingResolver/1.0"},
             method="GET",
         )
-        try:
-            response = opener.open(req, timeout=15)
-            status = response.status
-            location = response.headers.get("Location")
-            response.close()
-        except HTTPError as exc:
-            status = exc.code
-            location = exc.headers.get("Location")
-            exc.close()
-        except (URLError, TimeoutError, OSError) as exc:
+        # The shortener can drop a connection or fail DNS for a second;
+        # retry before failing the whole run.
+        last_exc = None
+        for attempt in range(3):
+            try:
+                response = opener.open(req, timeout=15)
+                status = response.status
+                location = response.headers.get("Location")
+                response.close()
+                last_exc = None
+                break
+            except HTTPError as exc:
+                status = exc.code
+                location = exc.headers.get("Location")
+                exc.close()
+                last_exc = None
+                break
+            except (URLError, TimeoutError, OSError) as exc:
+                last_exc = exc
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+        if last_exc is not None:
             raise HTTPException(
                 status_code=502,
-                detail=f"Tracking link could not be resolved: {type(exc).__name__}",
-            ) from exc
+                detail=f"Tracking link could not be resolved after 3 attempts: {type(last_exc).__name__}",
+            ) from last_exc
 
         if status not in (301, 302, 303, 307, 308) or not location:
             raise HTTPException(

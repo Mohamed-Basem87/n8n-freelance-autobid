@@ -28,7 +28,7 @@ It is the whole pipeline, not a template shell: the workflow, the browser backen
 4. **Chooses cost and duration** from the project's own budget: the lowest figure inside the advertised range, raised only to the platform's real minimum.
 5. **Fills the real form** — cost, period, proposal — and uploads exactly **four** portfolio images through the site's own upload widget (Dropzone on Mostaql, FileUploader on Nafezly).
 6. **Submits**, then verifies: the form disappearing is a success, a visible validation alert is a failure, an unreadable outcome is reported as a failure rather than a guess.
-7. **Alerts you** with job title, URL, platform, price, period, proposal, and the screenshot path.
+7. **Alerts you** with job title, URL, platform, price, period, proposal, and the screenshot path. If a node itself fails before an alert can be sent, a separate error workflow reports the failed node and links the execution.
 
 ## 2. Architecture
 
@@ -48,6 +48,7 @@ Telegram. Three protocols: HTTP webhook, HTTP + bearer token, Telegram Bot API.
             │                                                            │
             │ each outcome ends in a Telegram alert:                     │
             │ Error · Skipped · Not Sent · Bid Result                    │
+            │ node failure → error workflow → Telegram                   │
             │                                                            │
             └───────┬─────────────────────────────────────┬──────────────┘
                     │ POST /inspect                       │ Telegram Bot API
@@ -173,7 +174,7 @@ Details and alternatives in [Configuration](#4-configuration).
 
 ### 3.6 Import and wire the workflow
 
-See [Workflow setup](#5-workflow-setup). You need one chat-model credential and one Telegram credential.
+See [Workflow setup](#5-workflow-setup). You need one chat-model credential and one Telegram credential, plus the small error workflow in [5.6](#56-failure-alerts).
 
 ### 3.7 Dry run
 
@@ -273,7 +274,7 @@ Use a different model provider? Replace the `Groq Chat Model` node with any chat
 
 ### 5.1 Import
 
-In n8n: **Workflows → ⋯ → Import from File** → `workflow/freelance-autobid.json`.
+In n8n: **Workflows → ⋯ → Import from File** → `workflow/freelance-autobid.json`. Import `workflow/failure-alerts.json` the same way (see [5.6](#56-failure-alerts)).
 
 Or from the CLI:
 
@@ -296,6 +297,8 @@ Five nodes need one. Open each and pick a credential (n8n offers *Create new* in
 | `Telegram: Not Sent` | Telegram API | same bot |
 
 `AI Agent` needs none: it uses the chat-model node attached under it. If a Telegram node shows *Credential not found*, it is only a leftover reference — select your credential from the dropdown and save.
+
+The error workflow is imported separately: open `Telegram: Failure Alert` in *Freelance Auto-Bid - Failure Alerts* and pick the same Telegram credential (the error workflow ships without credential references).
 
 ### 5.3 Check the wiring
 
@@ -346,6 +349,19 @@ curl -i -X POST http://<n8n>:5678/webhook/loki-job \
 ```
 
 While the workflow is inactive, only the test URL works: `/webhook-test/loki-job`, and it needs **Execute workflow** clicked first.
+
+### 5.6 Failure alerts
+
+The main workflow sends a Telegram message for every outcome it can classify — bid landed, skipped, gate off, backend said no. It cannot send one when a node itself dies (backend HTTP 500, tracking URL unreachable, model call failed): the run aborts before any alert node.
+
+`workflow/failure-alerts.json` closes that gap. It is three nodes: **Error Trigger → Format Failure Alert → Telegram**.
+
+1. Import it, attach your Telegram credential to `Telegram: Failure Alert`, and publish/activate it.
+2. Open the main workflow → **Settings → Error Workflow** → select *Freelance Auto-Bid - Failure Alerts*.
+
+Every failed run then sends one message with the workflow name, the failed node, the error text, and a link to the execution. The main graph is untouched.
+
+Quick test: import the error workflow, create a throwaway workflow with a `Webhook` node and an `HTTP Request` node pointing at `http://127.0.0.1:9/`, set the same **Error Workflow** on it, activate it, and POST to its webhook. The alert should arrive within seconds.
 
 ## 6. Browser authentication
 
@@ -470,6 +486,8 @@ Limits enforced before any browser work:
 
 Mostaql's rule is not cosmetic: its form rejects any `http://`, `www.`, e-mail, or bare `word.tld` token, and anything under 200 characters. The service mirrors that check so you get a clear alert instead of a dead submit click.
 
+Transient failures are retried where a retry is safe. `/resolve-tracking` tries three times (2 s, then 4 s backoff) before returning `502`. `/inspect` retries one navigation timeout, stops the load, and reads the DOM that arrived; it returns `502` only if the page is completely empty. **Submits are never retried** — an ambiguous submit is reported as `submit_failed` / `submit_unknown`.
+
 ### Webhook contract
 
 `POST http://<n8n>:5678/webhook/loki-job`
@@ -522,6 +540,7 @@ Full detail in [docs/troubleshooting.md](docs/troubleshooting.md). The short tab
 | `validation_failed` (Mostaql) | proposal under 200 chars, or contains a link/domain/e-mail | rewrite the proposal; the alert names the offending fragment |
 | `review_required` + "form not found" (Nafezly) | you already bid on that project | cosmetic; nothing was submitted |
 | workflow runs, nothing is bid | a gate is off | check `Submit Enabled?` and `ALLOW_SUBMIT`; read `Telegram: Not Sent` |
+| failed run sends no alert | no error workflow set on the main workflow | set **Settings → Error Workflow** (see [5.6](#56-failure-alerts)); the normal alert nodes cannot run after a node error |
 | `$env` values are empty | n8n blocks env access | `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, restart n8n |
 | Telegram *chat not found* | wrong chat id, or you never messaged the bot | message the bot, re-read `getUpdates` |
 | workflow imports with unknown nodes | LangChain nodes missing | enable/install n8n LangChain nodes, re-import |
