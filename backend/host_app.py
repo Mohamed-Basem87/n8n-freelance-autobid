@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import time
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
@@ -15,7 +16,7 @@ from pydantic import BaseModel
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import Select, WebDriverWait
 from starlette.concurrency import run_in_threadpool
 
 API_KEY = os.environ["API_KEY"]
@@ -119,6 +120,11 @@ MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 ATTACHMENTS_REQUIRED = os.environ.get("ATTACHMENTS_REQUIRED", "1").strip().lower() in {
     "1", "true", "yes", "on",
 }
+
+# Screenshots are delivered to Telegram and then removed from the host. The
+# bot token lives only in the protected environment file beside this service.
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
 
 # Mostaql's bid form runs preventUrlsValidator() and min_length[200] on the
 # proposal. The validator rejects any scheme, any e-mail, and any bare
@@ -502,6 +508,8 @@ SUBMIT_SUCCESS_MARKERS = (
     "تم تقديم عرضك",
     "تم إضافة عرضك",
     "عرضك بنجاح",
+    "تم إنشاء العرض",
+    "تم تعديل العرض",
 )
 
 SUBMIT_ERROR_MARKERS = (
@@ -542,10 +550,21 @@ def _dismiss_alert(driver):
 def _read_page_state(driver):
     return driver.execute_script("""
         const form = document.querySelector('form#project__bid')
-            || document.querySelector('#offer-form');
+            || document.querySelector('#offer-form')
+            || document.querySelector('form[action*="projectBid"]');
+        const visible = el => {
+            if (!el) return false;
+            const rect = el.getBoundingClientRect();
+            const style = getComputedStyle(el);
+            return style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && rect.width > 0
+                && rect.height > 0;
+        };
         return {
             readyState: document.readyState,
             formPresent: !!form,
+            formVisible: visible(form),
             url: location.href,
             text: (document.body ? document.body.innerText : '').slice(0, 8000)
         };
@@ -653,7 +672,7 @@ def _submit_and_confirm(driver, click_selector, timeout=30):
         if "offer has been submitted" in lowered or "offer has been sent" in lowered:
             return True, "success_message", alerts, state
 
-        if not state.get("formPresent") and state.get("readyState") == "complete":
+        if not state.get("formVisible") and state.get("readyState") == "complete":
             return True, "form_disappeared", alerts, state
 
         time.sleep(0.5)
@@ -702,6 +721,349 @@ def _nafezly_limits(form):
         "max": _as_int(cost_el.get_attribute("max")),
     }
 
+
+def _kafiil_limits(form):
+    price_el = form.find_element("css selector", 'input[name="price"]')
+    return {
+        "min": _as_int(price_el.get_attribute("min")),
+        "max": _as_int(price_el.get_attribute("max")),
+    }
+
+
+def _capture_proposal_screenshot(driver, form, platform):
+    """Photograph the filled offer form before anything is submitted.
+
+    Kafiil, Mostaql, and Nafezly all replace or hide the form after a bid
+    lands, so the pre-submit view is the only image that shows the actual
+    proposal, price, and duration together.
+    """
+    path = SCREENSHOTS / f"{platform}-proposal-{int(time.time())}.png"
+    try:
+        driver.execute_script(
+            "arguments[0].scrollIntoView({block: 'center'});", form
+        )
+        time.sleep(0.5)
+        driver.save_screenshot(str(path))
+        return str(path)
+    except Exception:
+        return None
+
+
+def prepare_kafiil_offer(url, period, cost, proposal, submit=False, attachments=None):
+    options = Options()
+    options.binary_location = FIREFOX_BINARY
+    options.add_argument("-profile")
+    options.add_argument(str(PROFILE))
+    options.add_argument("-headless")
+
+    driver = webdriver.Firefox(options=options)
+    clicked = False
+    try:
+        driver.set_page_load_timeout(45)
+        driver.get(url)
+        WebDriverWait(driver, 15).until(
+            lambda d: d.execute_script(
+                "return document.readyState"
+            ) in ("interactive", "complete")
+        )
+
+        challenge_passed, challenge_wait = _wait_for_challenge(driver)
+        if not challenge_passed:
+            screenshot = SCREENSHOTS / "kafiil-challenge.png"
+            try:
+                driver.save_screenshot(str(screenshot))
+            except Exception:
+                pass
+            return {
+                "status": "challenge_failed",
+                "submitted": False,
+                "platform": "kafiil",
+                "reason": (
+                    "Bot check did not finish within "
+                    f"{challenge_wait}s; the real project page never loaded."
+                ),
+                "page_title": driver.title,
+                "final_url": driver.current_url,
+                "challenge_wait_s": challenge_wait,
+                "screenshot": str(screenshot),
+            }
+
+        if urlparse(driver.current_url).hostname not in PLATFORMS["kafiil"]["hosts"]:
+            raise HTTPException(status_code=400, detail="Unexpected final project host")
+
+        try:
+            form = WebDriverWait(driver, 12).until(
+                lambda d: d.find_element(
+                    "css selector", 'form[action*="projectBid"]'
+                )
+            )
+        except Exception:
+            page_text = driver.find_element("tag name", "body").text[:5000]
+            screenshot = SCREENSHOTS / "kafiil-form-missing.png"
+            try:
+                driver.save_screenshot(str(screenshot))
+            except Exception:
+                pass
+            already_bid = (
+                "عدد العروض" in page_text
+                or "تم إنشاء العرض" in page_text
+                or "يمكنك التعديل على عرض المشروع" in page_text
+            )
+            return {
+                "status": "already_bid" if already_bid else "review_required",
+                "submitted": False,
+                "platform": "kafiil",
+                "reason": (
+                    "Kafiil's bid form was not found. The project may be "
+                    "closed, or an offer has already been submitted."
+                ),
+                "page_title": driver.title,
+                "final_url": driver.current_url,
+                "page_text": page_text,
+                "screenshot": str(screenshot),
+            }
+
+        if not (form.get_attribute("action") or "").startswith(
+            "https://kafiil.com/projectBid"
+        ):
+            raise HTTPException(status_code=400, detail="Unexpected Kafiil offer form action")
+
+        project_id = None
+        try:
+            project_id = form.find_element(
+                "css selector", 'input[name="project_id"]'
+            ).get_attribute("value")
+        except Exception:
+            pass
+
+        period_el = Select(form.find_element("css selector", 'select[name="duration"]'))
+        price_el = form.find_element("css selector", 'input[name="price"]')
+        description_el = form.find_element("css selector", 'textarea[name="description"]')
+
+        available_periods = [
+            int(option.get_attribute("value"))
+            for option in period_el.options
+            if (option.get_attribute("value") or "").isdigit()
+        ]
+        if available_periods and int(period) not in available_periods:
+            screenshot = SCREENSHOTS / "kafiil-duration-out-of-range.png"
+            try:
+                driver.save_screenshot(str(screenshot))
+            except Exception:
+                pass
+            return {
+                "status": "review_required",
+                "submitted": False,
+                "platform": "kafiil",
+                "reason": (
+                    f"Kafiil does not offer {period} days; valid choices are "
+                    f"{available_periods[0]}–{available_periods[-1]}."
+                ),
+                "page_title": driver.title,
+                "final_url": driver.current_url,
+                "screenshot": str(screenshot),
+            }
+
+        limits = _kafiil_limits(form)
+        minimum_cost = limits.get("min")
+        maximum_cost = limits.get("max")
+        requested_cost = int(cost)
+        effective_cost = requested_cost
+        floor_adjusted = False
+        if minimum_cost and requested_cost < minimum_cost:
+            effective_cost = minimum_cost
+            floor_adjusted = True
+
+        if maximum_cost and effective_cost > maximum_cost:
+            screenshot = SCREENSHOTS / "kafiil-price-out-of-range.png"
+            try:
+                driver.save_screenshot(str(screenshot))
+            except Exception:
+                pass
+            return {
+                "status": "price_out_of_range",
+                "submitted": False,
+                "platform": "kafiil",
+                "reason": (
+                    f"Kafiil accepts offers between {minimum_cost} and "
+                    f"{maximum_cost}; the agent selected {requested_cost}."
+                ),
+                "requested_cost": requested_cost,
+                "minimum_cost": minimum_cost,
+                "maximum_cost": maximum_cost,
+                "page_title": driver.title,
+                "final_url": driver.current_url,
+                "screenshot": str(screenshot),
+            }
+
+        period_el.select_by_value(str(period))
+
+        price_el.clear()
+        price_el.send_keys(str(effective_cost))
+
+        description_el.clear()
+        description_el.send_keys(proposal)
+
+        driver.execute_script("""
+            const form = document.querySelector('form[action*="projectBid"]');
+            for (const el of form.querySelectorAll('input, select, textarea')) {
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        """)
+
+        validation = driver.execute_script("""
+            const form = document.querySelector('form[action*="projectBid"]');
+            return {
+                browserValid: form.checkValidity(),
+                fields: ['duration', 'price', 'description'].map(name => {
+                    const el = form.querySelector(`[name="${name}"]`);
+                    return {
+                        name,
+                        valid: el.checkValidity(),
+                        message: el.validationMessage,
+                        valueLength: (el.value || '').length
+                    };
+                }),
+                submitButtonClicked: false
+            };
+        """)
+
+        proposal_screenshot = _capture_proposal_screenshot(driver, form, "kafiil")
+
+        if not submit:
+            return {
+                "status": "dry_run_prepared",
+                "submitted": False,
+                "platform": "kafiil",
+                "project_id": project_id,
+                "attachments": {
+                    "supported": False,
+                    "uploaded": 0,
+                    "reason": "Kafiil's bid form has no attachment field.",
+                },
+                "page_title": driver.title,
+                "final_url": driver.current_url,
+                "period_days": period,
+                "requested_cost": requested_cost,
+                "cost_usd": effective_cost,
+                "minimum_cost": minimum_cost,
+                "maximum_cost": maximum_cost,
+                "floor_adjusted": floor_adjusted,
+                "validation": validation,
+                "proposal_screenshot": proposal_screenshot,
+                "message": "Kafiil offer fields filled for inspection only. The submit button was not clicked.",
+            }
+
+        if not ALLOW_SUBMIT:
+            screenshot = SCREENSHOTS / "kafiil-submit-disabled.png"
+            try:
+                driver.save_screenshot(str(screenshot))
+            except Exception:
+                pass
+            return {
+                "status": "submit_disabled",
+                "submitted": False,
+                "platform": "kafiil",
+                "project_id": project_id,
+                "reason": (
+                    "Submission was requested but ALLOW_SUBMIT is not enabled "
+                    "on the host service."
+                ),
+                "page_title": driver.title,
+                "final_url": driver.current_url,
+                "proposal_screenshot": proposal_screenshot,
+                "screenshot": str(screenshot),
+            }
+
+        if not validation.get("browserValid"):
+            screenshot = SCREENSHOTS / "kafiil-submit-invalid.png"
+            try:
+                driver.save_screenshot(str(screenshot))
+            except Exception:
+                pass
+            return {
+                "status": "validation_failed",
+                "submitted": False,
+                "platform": "kafiil",
+                "project_id": project_id,
+                "reason": "The browser rejected the form values; nothing was clicked.",
+                "validation": validation,
+                "page_title": driver.title,
+                "final_url": driver.current_url,
+                "proposal_screenshot": proposal_screenshot,
+                "screenshot": str(screenshot),
+            }
+
+        clicked = True
+        submitted, confirmation, alerts, state = _submit_and_confirm(
+            driver, 'form[action*="projectBid"] input[type="submit"]'
+        )
+        validation["submitButtonClicked"] = True
+
+        page_title, final_url = _safe_page_info(driver)
+        screenshot = SCREENSHOTS / (
+            "kafiil-submitted.png" if submitted else "kafiil-submit-failed.png"
+        )
+        try:
+            driver.save_screenshot(str(screenshot))
+        except Exception:
+            pass
+
+        result = {
+            "status": "submitted" if submitted else "submit_failed",
+            "submitted": submitted,
+            "platform": "kafiil",
+            "project_id": project_id,
+            "attachments": {
+                "supported": False,
+                "uploaded": 0,
+                "reason": "Kafiil's bid form has no attachment field.",
+            },
+            "confirmation": confirmation,
+            "alerts": alerts,
+            "page_title": page_title,
+            "final_url": final_url,
+            "period_days": period,
+            "requested_cost": requested_cost,
+            "cost_usd": effective_cost,
+            "minimum_cost": minimum_cost,
+            "maximum_cost": maximum_cost,
+            "floor_adjusted": floor_adjusted,
+            "validation": validation,
+            "proposal_screenshot": proposal_screenshot,
+            "screenshot": str(screenshot),
+            "message": (
+                "Kafiil accepted the offer."
+                if submitted
+                else "The offer was not confirmed; review the evidence before retrying."
+            ),
+        }
+        if not submitted:
+            result["page_text"] = (state.get("text") or "")[:3000]
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        screenshot = SCREENSHOTS / "kafiil-offer-error.png"
+        try:
+            driver.save_screenshot(str(screenshot))
+        except Exception:
+            pass
+
+        page_title, final_url = _safe_page_info(driver)
+        return {
+            "status": "submit_unknown" if clicked else "review_required",
+            "submitted": False,
+            "platform": "kafiil",
+            "reason": str(exc),
+            "clicked_before_error": clicked,
+            "page_title": page_title,
+            "final_url": final_url,
+            "screenshot": str(screenshot),
+        }
+    finally:
+        driver.quit()
 
 def prepare_nafezly_offer(url, period, cost, proposal, submit=False, attachments=None):
     options = Options()
@@ -847,6 +1209,8 @@ def prepare_nafezly_offer(url, period, cost, proposal, submit=False, attachments
                 "screenshot": str(screenshot),
             }
 
+        proposal_screenshot = _capture_proposal_screenshot(driver, form, "nafezly")
+
         validation = driver.execute_script("""
             const form = document.querySelector('#offer-form');
             const fields = ['period', 'cost', 'offer_description'];
@@ -882,6 +1246,7 @@ def prepare_nafezly_offer(url, period, cost, proposal, submit=False, attachments
                 "floor_adjusted": floor_adjusted,
                 "expected_net_usd": round(effective_cost * 0.85, 2),
                 "validation": validation,
+                "proposal_screenshot": proposal_screenshot,
                 "message": "Form filled for inspection only. No offer was submitted.",
             }
 
@@ -902,6 +1267,7 @@ def prepare_nafezly_offer(url, period, cost, proposal, submit=False, attachments
                 ),
                 "page_title": driver.title,
                 "final_url": driver.current_url,
+                "proposal_screenshot": proposal_screenshot,
                 "screenshot": str(screenshot),
             }
 
@@ -920,6 +1286,7 @@ def prepare_nafezly_offer(url, period, cost, proposal, submit=False, attachments
                 "validation": validation,
                 "page_title": driver.title,
                 "final_url": driver.current_url,
+                "proposal_screenshot": proposal_screenshot,
                 "screenshot": str(screenshot),
             }
 
@@ -955,6 +1322,7 @@ def prepare_nafezly_offer(url, period, cost, proposal, submit=False, attachments
             "floor_adjusted": floor_adjusted,
             "expected_net_usd": round(effective_cost * 0.85, 2),
             "validation": validation,
+            "proposal_screenshot": proposal_screenshot,
             "screenshot": str(screenshot),
             "message": (
                 "Nafezly accepted the offer."
@@ -1201,6 +1569,8 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
                 "screenshot": str(screenshot),
             }
 
+        proposal_screenshot = _capture_proposal_screenshot(driver, form, "mostaql")
+
         validation = driver.execute_script("""
             const form = document.querySelector('form#project__bid');
             const ids = ['bid__period', 'bid__cost', 'bid__details'];
@@ -1239,6 +1609,7 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
                 "minimum_cost": minimum_cost,
                 "floor_adjusted": floor_adjusted,
                 "validation": validation,
+                "proposal_screenshot": proposal_screenshot,
                 "screenshot": str(screenshot),
                 "message": (
                     "Mostaql offer fields filled for inspection only. "
@@ -1263,6 +1634,7 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
                 ),
                 "page_title": driver.title,
                 "final_url": driver.current_url,
+                "proposal_screenshot": proposal_screenshot,
                 "screenshot": str(screenshot),
             }
 
@@ -1281,6 +1653,7 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
                 "validation": validation,
                 "page_title": driver.title,
                 "final_url": driver.current_url,
+                "proposal_screenshot": proposal_screenshot,
                 "screenshot": str(screenshot),
             }
 
@@ -1314,6 +1687,7 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
             "minimum_cost": minimum_cost,
             "floor_adjusted": floor_adjusted,
             "validation": validation,
+            "proposal_screenshot": proposal_screenshot,
             "screenshot": str(screenshot),
             "message": (
                 "Mostaql accepted the bid."
@@ -1494,10 +1868,10 @@ async def prepare_offer(
     authenticate(authorization)
 
     platform = request.platform.lower().strip()
-    if platform not in {"nafezly", "mostaql"}:
+    if platform not in {"nafezly", "mostaql", "kafiil"}:
         raise HTTPException(
             status_code=400,
-            detail="Prepare-offer supports Nafezly and Mostaql only",
+            detail="Prepare-offer supports Nafezly, Mostaql, and Kafiil only",
         )
 
     validate_url(platform, request.url)
@@ -1511,6 +1885,8 @@ async def prepare_offer(
         raise HTTPException(status_code=400, detail="Nafezly cost must be $1–$10,000")
     if platform == "mostaql" and not 5 <= request.cost <= 10000:
         raise HTTPException(status_code=400, detail="Mostaql cost must be $5–$10,000")
+    if platform == "kafiil" and not 5 <= request.cost <= 10000:
+        raise HTTPException(status_code=400, detail="Kafiil cost must be $5–$10,000")
 
     proposal = request.offer_description.strip()
     if not 30 <= len(proposal) <= 5000:
@@ -1535,14 +1911,21 @@ async def prepare_offer(
             }
 
     attachment_paths = []
-    if request.attachments_required and ATTACHMENTS_REQUIRED:
+    # Kafiil's bid form has no attachment widget, so the portfolio images
+    # are only required on Mostaql and Nafezly.
+    if (
+        platform != "kafiil"
+        and request.attachments_required
+        and ATTACHMENTS_REQUIRED
+    ):
         attachment_paths = _resolve_attachments(request.attachments)
 
-    prepare_function = (
-        prepare_nafezly_offer
-        if platform == "nafezly"
-        else prepare_mostaql_offer
-    )
+    if platform == "nafezly":
+        prepare_function = prepare_nafezly_offer
+    elif platform == "mostaql":
+        prepare_function = prepare_mostaql_offer
+    else:
+        prepare_function = prepare_kafiil_offer
 
     if request.submit and not ALLOW_SUBMIT:
         return {
@@ -1639,8 +2022,8 @@ def resolve_tracking_url(platform, url):
             headers={"User-Agent": "Loki-TrackingResolver/1.0"},
             method="GET",
         )
-        # The shortener can drop a connection or fail DNS for a second;
-        # retry before failing the whole run.
+        # The shortener lives behind Tailscale and occasionally drops a
+        # connection or fails DNS for a second; retry before failing the run.
         last_exc = None
         for attempt in range(3):
             try:
@@ -1675,6 +2058,168 @@ def resolve_tracking_url(platform, url):
         current = urljoin(current, location)
 
     raise HTTPException(status_code=502, detail="Too many tracking redirects")
+
+
+def _screenshot_path(raw, field="screenshot", must_exist=True):
+    """Resolve a path only when it stays inside the screenshots directory."""
+    candidate = Path(raw).expanduser().resolve()
+    root = SCREENSHOTS.resolve()
+    if root != candidate and root not in candidate.parents:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must be inside {SCREENSHOTS}",
+        )
+    if candidate.suffix.lower() not in ALLOWED_IMAGE_SUFFIXES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must be a PNG, JPG, JPEG, or WebP image",
+        )
+    if must_exist and not candidate.is_file():
+        raise HTTPException(status_code=404, detail=f"{field} not found")
+    return candidate
+
+
+def _remove_screenshot(path):
+    try:
+        path.unlink()
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return False
+
+
+def _telegram_send_photo(path, caption):
+    """Upload one screenshot with stdlib multipart, no third-party client."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        raise HTTPException(
+            status_code=503,
+            detail="Telegram credentials are not configured on the host service",
+        )
+
+    boundary = f"----LokiScreenshot{uuid.uuid4().hex}"
+    body = bytearray()
+
+    def add_field(name, value):
+        body.extend(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode("utf-8")
+        )
+
+    add_field("chat_id", TELEGRAM_CHAT_ID)
+    if caption:
+        add_field("caption", caption[:1024])
+
+    body.extend(
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="photo"; '
+            f'filename="{path.name}"\r\n'
+            f"Content-Type: image/png\r\n\r\n"
+        ).encode("utf-8")
+    )
+    body.extend(path.read_bytes())
+    body.extend(b"\r\n")
+    body.extend(f"--{boundary}--\r\n".encode("ascii"))
+
+    request = Request(
+        f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto",
+        data=bytes(body),
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        method="POST",
+    )
+    try:
+        with build_opener().open(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise HTTPException(
+            status_code=502,
+            detail=f"Telegram rejected the photo: {detail}",
+        ) from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Telegram photo upload failed: {type(exc).__name__}",
+        ) from exc
+
+    if not payload.get("ok"):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Telegram rejected the photo: {payload}",
+        )
+    return (payload.get("result") or {}).get("message_id")
+
+
+class NotifyScreenshotRequest(BaseModel):
+    screenshot: str | None = None
+    caption: str = ""
+    cleanup: str | None = None
+    send: bool = True
+
+
+@app.post("/notify-screenshot")
+async def notify_screenshot(
+    request: NotifyScreenshotRequest,
+    authorization: str | None = Header(default=None),
+):
+    """Send a bid screenshot to Telegram, then always delete the image files.
+
+    The n8n workflow calls this after a bid so the operator sees the filled
+    proposal in Telegram. ``send=false`` performs cleanup only, which is used
+    for skipped jobs. Cleanup is in ``finally`` on purpose: the host must not
+    keep screenshots around when the notification fails.
+    """
+    authenticate(authorization)
+
+    photo = None
+    if request.screenshot:
+        photo = _screenshot_path(request.screenshot, must_exist=request.send)
+    elif request.send:
+        raise HTTPException(status_code=400, detail="screenshot is required when send is true")
+
+    cleanup = []
+    if photo is not None:
+        cleanup.append(photo)
+    for raw in (request.cleanup or "").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        candidate = _screenshot_path(raw, field="cleanup", must_exist=False)
+        if candidate not in cleanup:
+            cleanup.append(candidate)
+
+    message_id = None
+    error = None
+    if request.send:
+        try:
+            message_id = await run_in_threadpool(
+                _telegram_send_photo, photo, request.caption
+            )
+        except HTTPException as exc:
+            error = {"status_code": exc.status_code, "detail": exc.detail}
+        finally:
+            deleted = [str(path) for path in cleanup if _remove_screenshot(path)]
+    else:
+        deleted = [str(path) for path in cleanup if _remove_screenshot(path)]
+
+    if error:
+        return {
+            "status": "telegram_failed",
+            "sent": False,
+            "error": error,
+            "deleted": deleted,
+        }
+
+    return {
+        "status": "sent" if request.send else "cleaned",
+        "sent": request.send,
+        "message_id": message_id,
+        "deleted": deleted,
+    }
 
 
 @app.post("/resolve-tracking")

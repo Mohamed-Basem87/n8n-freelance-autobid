@@ -1,7 +1,10 @@
 # Portfolio images
 
-Every proposal attaches exactly **four** images from the folder the backend is
-configured to read (`LOKI_ATTACHMENTS_DIR`, default `<data>/attachments`).
+Every Mostaql and Nafezly proposal attaches exactly **four** images from the
+folder the backend is configured to read (`LOKI_ATTACHMENTS_DIR`, default
+`<data>/attachments`). Kafiil's bid form has no upload field, so Kafiil offers
+skip attachments automatically — the files are still required for the other two
+platforms.
 
 Put your own screenshots here — dashboards, reports, before/after cleaning —
 then copy them to the server:

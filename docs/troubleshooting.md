@@ -24,7 +24,7 @@ Never run `host_app.py`, `login.py` or a manual probe as `root`. One `sudo` run 
 
 ## The bid form never appears
 
-`already_bid` is returned when `form#project__bid` (Mostaql) or `#offer-form` (Nafezly) is absent. Usually that is correct:
+`already_bid` is returned when `form#project__bid` (Mostaql), `#offer-form` (Nafezly), or `form[action*="projectBid"]` (Kafiil) is absent. Usually that is correct:
 
 - Mostaql free accounts get **one bid per day**. After it is used the page says `لا يمكنك تقديم المزيد من العروض الآن` and no form renders until the reset.
 - You already bid on that project.
@@ -42,7 +42,7 @@ If this breaks after a redesign, the check to redo is: does `[data-ui="dropzone"
 
 **`attachments_unsupported`**
 
-The form on that page has no upload field at all. The service refuses to bid rather than post a proposal without images.
+The form on that page has no upload field at all. The service refuses to bid rather than post a proposal without images. Kafiil is the exception: its form genuinely has no upload field, so the service skips attachments there by design and reports `"supported": false`.
 
 **Wrong image count**
 
@@ -75,7 +75,7 @@ If this starts happening every time, the session cookies have probably expired. 
 Each platform clamps to its own minimum, so a $10 bid can be submitted as $25:
 
 - The LLM proposes a number from the advertised budget.
-- The backend reads the form's real minimum (`costValidationMinValue` on Mostaql, the `min` attribute on Nafezly's `#cost`) and raises the value to it.
+- The backend reads the form's real minimum (`costValidationMinValue` on Mostaql, the `min` attribute on Nafezly's `#cost` and Kafiil's `input[name="price"]`) and raises the value to it.
 - The alert shows `(raised from X to the project minimum)` when that happens.
 
 If the floor looks wrong, the project page is the source of truth — read the minimum from the form, not from the budget text.
@@ -163,7 +163,7 @@ df -h /dev/shm
 
 ## Disk fills up
 
-`data/test-profile` is ~340 MB and grows slowly; `data/screenshots` grows one file per attempt. Prune screenshots, keep the profile:
+`data/test-profile` is ~340 MB and grows slowly. Screenshots are normally deleted after each notification; leftovers appear only when a run dies before its cleanup node. Prune those, keep the profile:
 
 ```bash
 find /opt/freelance-autobid/data/screenshots -type f -mtime +30 -delete

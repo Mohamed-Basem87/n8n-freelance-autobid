@@ -1,6 +1,6 @@
 # Freelance Auto-Bid — n8n + Firefox
 
-An n8n workflow plus a small Selenium service that writes a tailored proposal, picks a price and duration, attaches four portfolio images, and submits the offer on **Mostaql** and **Nafezly** — then reports every attempt, success or failure, to Telegram.
+An n8n workflow plus a small Selenium service that writes a tailored proposal, picks a price and duration, fills the real bid form, and submits the offer on **Mostaql**, **Nafezly**, and **Kafiil** — then reports every attempt, success or failure, to Telegram with a screenshot of the filled proposal. Mostaql and Nafezly also get four portfolio images; Kafiil's form has no upload field.
 
 It is the whole pipeline, not a template shell: the workflow, the browser backend, the deployment files and the operational notes.
 
@@ -26,9 +26,9 @@ It is the whole pipeline, not a template shell: the workflow, the browser backen
 2. **Inspects the live page** in the browser and hands the text to an LLM.
 3. **Writes the proposal** in the project's language, with the client's name when it is visible, and no pricing inside the text.
 4. **Chooses cost and duration** from the project's own budget: the lowest figure inside the advertised range, raised only to the platform's real minimum.
-5. **Fills the real form** — cost, period, proposal — and uploads exactly **four** portfolio images through the site's own upload widget (Dropzone on Mostaql, FileUploader on Nafezly).
-6. **Submits**, then verifies: the form disappearing is a success, a visible validation alert is a failure, an unreadable outcome is reported as a failure rather than a guess.
-7. **Alerts you** with job title, URL, platform, price, period, proposal, and the screenshot path. If a node itself fails before an alert can be sent, a separate error workflow reports the failed node and links the execution.
+5. **Fills the real form** — cost, period, proposal — and uploads exactly **four** portfolio images through the site's own upload widget (Dropzone on Mostaql, FileUploader on Nafezly). Kafiil skips uploads because its form has none.
+6. **Captures the filled proposal**, then submits and verifies: the form disappearing or an explicit success message is a success, a visible validation alert is a failure, an unreadable outcome is reported as a failure rather than a guess.
+7. **Alerts you** with job title, URL, platform, price, period, proposal, and the filled-proposal screenshot as a Telegram photo. The host deletes the screenshot files after sending, even if Telegram fails. If a node itself fails before an alert can be sent, a separate error workflow reports the failed node and links the execution.
 
 ## 2. Architecture
 
@@ -65,11 +65,13 @@ Telegram. Three protocols: HTTP webhook, HTTP + bearer token, Telegram Bot API.
                     │
                     │ drives the real pages over HTTPS
                     ▼
-      ┌─────────────┬──────────────────┐
-      │ mostaql.com        nafezly.com │
-      └─────────────┬──────────────────┘
+      ┌─────────────┬──────────────────┬──────────────┐
+      │ mostaql.com   nafezly.com   kafiil.com        │
+      └─────────────┬──────────────────┴──────────────┘
                     │
-                    └─► screenshots saved to data/screenshots/
+                    └─► proposal screenshot
+                          └─► POST /notify-screenshot → Telegram photo
+                                └─► files deleted from data/screenshots/
 ```
 
 Read it as three hops:
@@ -85,17 +87,18 @@ Read it as three hops:
 | your feed | n8n | `POST /webhook/loki-job`, JSON | none by default — see [Legal and risk](#11-legal-and-risk) |
 | n8n | LLM provider | n8n credential (Groq by default) | API key in the credential |
 | n8n | host service | HTTP on `:8000` | `Authorization: Bearer <API_KEY>` |
-| host service | Mostaql / Nafezly | headless Firefox, real sessions | cookies in the profile |
+| host service | Mostaql / Nafezly / Kafiil | headless Firefox, real sessions | cookies in the profile |
 | n8n | Telegram | Bot API | bot token in the credential |
+| host service | Telegram | Bot API `sendPhoto`, then deletes the files | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` in `host-api.env` |
 
 ### Why the split exists
 
-n8n is good at orchestration and bad at being a browser. The service is good at being a browser and intentionally dumb: it takes a proposal, a cost, a period and four images, and it either submits them or explains why not. All judgement — eligibility, pricing, wording — lives in the workflow; all irreversible actions live behind two gates in the service.
+n8n is good at orchestration and bad at being a browser. The service is good at being a browser and intentionally dumb: it takes a proposal, a cost, a period and (where the platform supports them) four images, and it either submits them or explains why not. All judgement — eligibility, pricing, wording — lives in the workflow; all irreversible actions live behind two gates in the service.
 
 ### Sequencing
 
 - **Serialized browsers.** The service holds a lock; two jobs arriving together queue rather than open two Firefox instances. A run that hangs blocks the queue until it times out (~120 s per call).
-- **Typical timing.** Inspect ~10–20 s, prepare-offer ~25–90 s including uploads. The workflow waits for each call.
+- **Typical timing.** Inspect ~10–20 s, prepare-offer ~25–90 s including uploads (Kafiil is faster because it uploads nothing). The workflow waits for each call.
 - **Stateless workflow.** No database, no queue. Duplicate prevention is the page itself: a project you already bid on returns `already_bid`.
 
 ## 3. Getting started
@@ -203,7 +206,9 @@ Only after a dry run looks right — see [Armed and unarmed](#7-armed-and-unarme
 |---|---|---|---|
 | `API_KEY` | **yes** | generated | shared secret. The workflow sends it as `Authorization: Bearer <API_KEY>` |
 | `ALLOW_SUBMIT` | no | `0` | `1` permits real bids. `0` fills and validates but never clicks |
-| `ATTACHMENTS_REQUIRED` | no | `1` | `0` allows bidding without images (not recommended) |
+| `ATTACHMENTS_REQUIRED` | no | `1` | `0` allows bidding without images (not recommended). Kafiil is skipped automatically because its form has no upload field |
+| `TELEGRAM_BOT_TOKEN` | for screenshots | empty | bot used by `/notify-screenshot` to send the filled-proposal photo |
+| `TELEGRAM_CHAT_ID` | for screenshots | empty | destination chat for that photo |
 | `LOKI_DATA_DIR` | no | `/opt/freelance-autobid/data` | root for the three folders below |
 | `LOKI_PROFILE_DIR` | no | `<data>/test-profile` | Firefox profile = the login session |
 | `LOKI_SCREENSHOT_DIR` | no | `<data>/screenshots` | one PNG per attempt |
@@ -282,7 +287,7 @@ Or from the CLI:
 n8n import:workflow --input=/path/to/workflow/freelance-autobid.json
 ```
 
-The workflow imports **inactive**. The file contains 21 nodes and no credentials.
+The workflow imports **inactive**. The file contains 25 nodes and no credentials.
 
 ### 5.2 Attach credentials
 
@@ -297,6 +302,8 @@ Five nodes need one. Open each and pick a credential (n8n offers *Create new* in
 | `Telegram: Not Sent` | Telegram API | same bot |
 
 `AI Agent` needs none: it uses the chat-model node attached under it. If a Telegram node shows *Credential not found*, it is only a leftover reference — select your credential from the dropdown and save.
+
+The four `Notify … Screenshot` / `Cleanup … Screenshot` nodes are plain HTTP calls: they carry no n8n credential, only the backend bearer header. For the photo to arrive, the **backend** also needs `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `host-api.env`.
 
 The error workflow is imported separately: open `Telegram: Failure Alert` in *Freelance Auto-Bid - Failure Alerts* and pick the same Telegram credential (the error workflow ships without credential references).
 
@@ -316,13 +323,15 @@ Webhook
                             └─ AI Agent  (Groq Chat Model attached)
                                 └─ Parse Application Proposal
                                     └─ Eligible?
-                                        ├─ no  → Stop: Not Eligible → Telegram: Skipped
+                                        ├─ no  → Stop: Not Eligible → Telegram: Skipped → Cleanup Skipped Screenshot
                                         └─ yes → Submit Enabled?
-                                            ├─ no  → Stop: Submit Disabled → Telegram: Not Sent
+                                            ├─ no  → Stop: Submit Disabled → Telegram: Not Sent → Cleanup Disabled Screenshot
                                             └─ yes → Prepare Offer
-                                                ├─ success → Telegram: Bid Result
-                                                └─ error   → Telegram: Error
+                                                ├─ success → Telegram: Bid Result → Notify Bid Screenshot
+                                                └─ error   → Telegram: Error → Notify Error Screenshot
 ```
+
+`Notify … Screenshot` sends the filled-proposal photo and deletes every screenshot for that run. `Cleanup … Screenshot` deletes leftovers with `"send": false` when nothing was bid.
 
 A green run with no bid is almost always `Submit Enabled?` returning false — that is the design, not a failure.
 
@@ -333,7 +342,7 @@ One gap worth knowing: a job that arrives **without a URL** stops at `Stop: No J
 | where | what |
 |---|---|
 | `AI Agent` → system message, section 3 | the skills list. Put **your** real skills there |
-| `AI Agent` → system message, rule 11 | the signature. Replace with your name or delete the rule |
+| `AI Agent` → system message, rules 11–12 | the signature policy. It forbids signing with your name or mentioning it anywhere; edit only if you want a signature |
 | `Submit Enabled?` | stays `false` until you are ready — see [Armed and unarmed](#7-armed-and-unarmed) |
 | `Webhook` node | the path (`loki-job`); change it if you like, then use the new URL |
 
@@ -471,11 +480,12 @@ All endpoints except `/health` need `Authorization: Bearer <API_KEY>`.
 |---|---|
 | `GET /health` | liveness, no auth |
 | `POST /inspect` | open a platform URL, return title, text, screenshot |
-| `POST /prepare-offer` | fill the form, upload images, optionally submit |
+| `POST /prepare-offer` | fill the form, upload images where supported, optionally submit |
+| `POST /notify-screenshot` | send one screenshot to Telegram, then delete every listed file |
 | `POST /open-login` | load a platform home page in the bot profile (a session check, not an interactive login) |
 | `POST /resolve-tracking` | follow a shortener to the real platform URL |
 
-`/prepare-offer` accepts `platform`, `url`, `period` (1–90), `cost`, `offer_description`, `submit`, and optional `attachments`.
+`/prepare-offer` accepts `platform`, `url`, `period` (1–90), `cost`, `offer_description`, `submit`, optional `attachments`, and `attachments_required` (default `true`).
 
 Limits enforced before any browser work:
 
@@ -483,8 +493,13 @@ Limits enforced before any browser work:
 |---|---|---|
 | Mostaql | $5–$10,000 | 200–10,000 chars, no links/emails/domain names |
 | Nafezly | $1–$10,000 | 30–5,000 chars |
+| Kafiil | $5–$10,000 | 30–5,000 chars |
 
 Mostaql's rule is not cosmetic: its form rejects any `http://`, `www.`, e-mail, or bare `word.tld` token, and anything under 200 characters. The service mirrors that check so you get a clear alert instead of a dead submit click.
+
+**Kafiil specifics.** The bid form is `form[action*="projectBid"]` with `select[name="duration"]`, `input[name="price"]`, and `textarea[name="description"]` — no file input. The service skips attachments and reports `"attachments": {"supported": false}`. The real minimum price is read from the live `min` attribute on the price input; a lower requested price is raised to it and flagged with `floor_adjusted: true`. Success is confirmed by `تم إنشاء العرض` / `تم تعديل العرض`, and a missing form with `عدد العروض` or `يمكنك التعديل على عرض المشروع` returns `already_bid`.
+
+`/notify-screenshot` accepts `screenshot`, `caption`, `cleanup` (comma-separated extra paths), and `send` (default `true`). It confines every path to the screenshots directory, uploads the photo with the Telegram Bot API, and deletes all listed files in a `finally` block. `send: false` performs cleanup only.
 
 Transient failures are retried where a retry is safe. `/resolve-tracking` tries three times (2 s, then 4 s backoff) before returning `502`. `/inspect` retries one navigation timeout, stops the load, and reads the DOM that arrived; it returns `502` only if the page is completely empty. **Submits are never retried** — an ambiguous submit is reported as `submit_failed` / `submit_unknown`.
 
@@ -503,7 +518,7 @@ Transient failures are retried where a retry is safe. `/resolve-tracking` tries 
 }
 ```
 
-- `platform` is `mostaql` or `nafezly`.
+- `platform` is `mostaql`, `nafezly`, or `kafiil`.
 - `url` must be `https` on the platform's own host; anything else is rejected before a browser opens.
 - `budget` is optional, the LLM also reads it from the text.
 - `description` is what the model sees — pass the real project text, not a stub.
@@ -514,8 +529,9 @@ Transient failures are retried where a retry is safe. `/resolve-tracking` tries 
 |---|---|
 | `submitted` | the form was accepted and disappeared |
 | `dry_run_prepared` | filled and validated, nothing clicked |
-| `already_bid` | no form: an offer already exists, or the daily limit is spent |
+| `already_bid` | no form: an offer already exists, the daily limit is spent, or Kafiil shows an existing offer |
 | `validation_failed` | the form or the service rejected the values |
+| `price_out_of_range` | the selected price is above the platform's live maximum |
 | `attachment_failed` | fewer than four images landed |
 | `attachments_unsupported` | the form has no upload field; nothing submitted |
 | `submit_disabled` | submission asked for, `ALLOW_SUBMIT` off |
@@ -539,6 +555,8 @@ Full detail in [docs/troubleshooting.md](docs/troubleshooting.md). The short tab
 | `attachments_unsupported` | that form has no upload field | nothing is submitted; bid manually if you accept no images |
 | `validation_failed` (Mostaql) | proposal under 200 chars, or contains a link/domain/e-mail | rewrite the proposal; the alert names the offending fragment |
 | `review_required` + "form not found" (Nafezly) | you already bid on that project | cosmetic; nothing was submitted |
+| `price_out_of_range` (Kafiil) | selected price is above the live form maximum | lower the price; the alert reports the form's min/max |
+| Kafiil proposal has no portfolio images | its bid form has no upload field | attach samples on your Kafiil profile or send them in chat |
 | workflow runs, nothing is bid | a gate is off | check `Submit Enabled?` and `ALLOW_SUBMIT`; read `Telegram: Not Sent` |
 | failed run sends no alert | no error workflow set on the main workflow | set **Settings → Error Workflow** (see [5.6](#56-failure-alerts)); the normal alert nodes cannot run after a node error |
 | `$env` values are empty | n8n blocks env access | `N8N_BLOCK_ENV_ACCESS_IN_NODE=false`, restart n8n |
@@ -549,6 +567,7 @@ Full detail in [docs/troubleshooting.md](docs/troubleshooting.md). The short tab
 
 ## 10. Known limitations
 
+- **Kafiil has no attachment field.** Portfolio images cannot be uploaded with a Kafiil bid; only duration, price, and description are sent. Use the profile portfolio or chat for samples.
 - **Mostaql allows one bid per day** on the free plan. A second attempt returns `already_bid`.
 - **Selectors are tied to the current markup.** A redesign needs `host_app.py` updating. The screenshot and `page_title` in the alert tell you quickly whether it is a layout change.
 - **The LLM is not deterministic.** The same job can come back `review_required` once and `eligible` the next time.
@@ -556,7 +575,7 @@ Full detail in [docs/troubleshooting.md](docs/troubleshooting.md). The short tab
 - **`/inspect` truncates page text at 12,000 characters.** Long projects lose their tail.
 - **No dedupe queue.** Duplicates are stopped by reading the page, not by a database.
 - **One browser at a time.** Requests serialize; a hung run blocks the queue until it times out.
-- **The prompt contains a signature rule.** Set your own name there, or remove the signature.
+- **The prompt forbids signatures.** Rules 11–12 stop the model from signing the proposal or mentioning your own name at the end; edit them only if you want a signature.
 - **Ubuntu's snap Firefox is confined** and will not use a profile under `/opt`. Use Debian's `firefox-esr` or Mozilla's tarball.
 - **The import does not carry credentials.** That is intentional; you attach your own.
 
