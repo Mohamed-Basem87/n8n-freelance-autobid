@@ -497,11 +497,15 @@ Limits enforced before any browser work:
 
 Mostaql's rule is not cosmetic: its form rejects any `http://`, `www.`, e-mail, or bare `word.tld` token, and anything under 200 characters. The service mirrors that check so you get a clear alert instead of a dead submit click.
 
+**Mostaql specifics.** Mostaql recalculates the minimum offer from the live bids, so a price that was valid when the page loaded can be rejected seconds later. The server re-renders the form with `يجب أن لا تقل قيمة الحقل قيمة العرض عن N`, which means nothing was submitted. The service reads `N`, refills the form, re-uploads the images, and retries at that exact price (at most twice). The result reports `server_required_minimum` and `retry_count`. A success removes the form, so this path cannot create a duplicate bid.
+
 **Kafiil specifics.** The bid form is `form[action*="projectBid"]` with `select[name="duration"]`, `input[name="price"]`, and `textarea[name="description"]` — no file input. The service skips attachments and reports `"attachments": {"supported": false}`. The real minimum price is read from the live `min` attribute on the price input; a lower requested price is raised to it and flagged with `floor_adjusted: true`. Success is confirmed by `تم إنشاء العرض` / `تم تعديل العرض`, and a missing form with `عدد العروض` or `يمكنك التعديل على عرض المشروع` returns `already_bid`.
+
+**Account caps.** Nafezly hides the offer form once the account holds more than ten open offers in fourteen days and shows `أكثر من 10 عروض على مشاريع مفتوحة آخر 14 يوم`. The service recognises that notice and returns `review_required` with `platform_limit_reached: true` and a reason naming the cap, instead of blaming a closed project. No code change can bypass it; bidding resumes when one of those offers is awarded, rejected, or its project closes.
 
 `/notify-screenshot` accepts `screenshot`, `caption`, `cleanup` (comma-separated extra paths), and `send` (default `true`). It confines every path to the screenshots directory, uploads the photo with the Telegram Bot API, and deletes all listed files in a `finally` block. `send: false` performs cleanup only.
 
-Transient failures are retried where a retry is safe. `/resolve-tracking` tries three times (2 s, then 4 s backoff) before returning `502`. `/inspect` retries one navigation timeout, stops the load, and reads the DOM that arrived; it returns `502` only if the page is completely empty. **Submits are never retried** — an ambiguous submit is reported as `submit_failed` / `submit_unknown`.
+Transient failures are retried where a retry is safe. `/resolve-tracking` tries three times (2 s, then 4 s backoff) before returning `502`. `/inspect` retries one navigation timeout, stops the load, and reads the DOM that arrived; it returns `502` only if the page is completely empty. **Ambiguous submits are never retried** — they are reported as `submit_failed` / `submit_unknown`. The one exception is a Mostaql price rejection that explicitly states the new minimum: the form is still on screen, so the service retries at that price (see above).
 
 ### Webhook contract
 

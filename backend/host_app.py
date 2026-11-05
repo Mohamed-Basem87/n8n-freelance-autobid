@@ -714,6 +714,91 @@ def _mostaql_min_cost(driver, form):
     return max(candidates) if candidates else None
 
 
+PLATFORM_LIMIT_MARKERS = (
+    "أكثر من 10 عروض",
+    "عروض على مشاريع مفتوحة",
+    "نرجو منك الانتظار لحين اختيارك",
+)
+
+
+def _platform_limit_reason(text):
+    """Explain an account-level bid cap that hides the offer form.
+
+    Nafezly removes the form entirely once the account holds more than ten
+    open offers in fourteen days and shows a notice instead. Without this
+    check the failure looks like a closed project, which sends the operator
+    looking for the wrong problem.
+    """
+    if any(marker in (text or "") for marker in PLATFORM_LIMIT_MARKERS):
+        return (
+            "The platform is blocking new offers: this account already holds "
+            "more than 10 open offers from the last 14 days. The form returns "
+            "once one of them is awarded, rejected, or closed."
+        )
+    return None
+
+
+def _uploaded_file_count(driver, form):
+    """How many images the form already holds, best effort.
+
+    Used before re-uploading on a Mostaql retry: if the re-rendered page kept
+    the finished uploads, sending them again would attach duplicates.
+    """
+    try:
+        raw = driver.execute_script(
+            """
+            const form = arguments[0] || document;
+            const pick = (sel) => (form && form.querySelector(sel))
+                || document.querySelector(sel);
+            const parse = (value) => {
+                if (!value) return [];
+                try {
+                    const parsed = JSON.parse(value);
+                    if (Array.isArray(parsed)) return parsed;
+                    if (parsed && typeof parsed === 'object') return [parsed];
+                } catch (e) {}
+                return String(value)
+                    .split(/[,\\/]+/)
+                    .map((v) => v.trim())
+                    .filter(Boolean);
+            };
+            const files = parse(
+                (pick('input[name="files"], #uploadedFiles') || {}).value
+            );
+            const nafezly = parse(
+                (pick('input[name="fileuploader-list-file"]') || {}).value
+            );
+            return Math.max(files.length, nafezly.length);
+            """,
+            form,
+        )
+        return int(raw or 0)
+    except Exception:
+        return 0
+
+
+MOSTAQL_REQUIRED_MIN_PATTERNS = (
+    re.compile(r"يجب أن لا تقل قيمة الحقل قيمة العرض عن\s*(\d+)"),
+    re.compile(r"لا يمكن تقديم عرض أقل من[^\n\d]{0,30}?(\d+)"),
+)
+
+
+def _mostaql_required_min(text):
+    """Read the minimum from a server rejection, or return None.
+
+    Mostaql recalculates the minimum from the live bids, so a price that was
+    valid when the form loaded can be rejected seconds later with a message
+    such as "يجب أن لا تقل قيمة الحقل قيمة العرض عن 60". The server re-renders
+    the form, which means nothing was submitted and the bid can be retried at
+    the stated floor.
+    """
+    for pattern in MOSTAQL_REQUIRED_MIN_PATTERNS:
+        match = pattern.search(text or "")
+        if match:
+            return _as_int(match.group(1))
+    return None
+
+
 def _nafezly_limits(form):
     cost_el = form.find_element("id", "cost")
     return {
@@ -809,14 +894,16 @@ def prepare_kafiil_offer(url, period, cost, proposal, submit=False, attachments=
                 or "تم إنشاء العرض" in page_text
                 or "يمكنك التعديل على عرض المشروع" in page_text
             )
+            limit_reason = _platform_limit_reason(page_text)
             return {
                 "status": "already_bid" if already_bid else "review_required",
                 "submitted": False,
                 "platform": "kafiil",
-                "reason": (
+                "reason": limit_reason or (
                     "Kafiil's bid form was not found. The project may be "
                     "closed, or an offer has already been submitted."
                 ),
+                **({"platform_limit_reached": True} if limit_reason else {}),
                 "page_title": driver.title,
                 "final_url": driver.current_url,
                 "page_text": page_text,
@@ -1115,6 +1202,19 @@ def prepare_nafezly_offer(url, period, cost, proposal, submit=False, attachments
             page_text = driver.find_element("tag name", "body").text[:5000]
             screenshot = SCREENSHOTS / "prepare-offer-form-missing.png"
             driver.save_screenshot(str(screenshot))
+            limit_reason = _platform_limit_reason(page_text)
+            if limit_reason:
+                return {
+                    "status": "review_required",
+                    "submitted": False,
+                    "platform": "nafezly",
+                    "reason": limit_reason,
+                    "platform_limit_reached": True,
+                    "page_title": driver.title,
+                    "final_url": driver.current_url,
+                    "page_text": page_text,
+                    "screenshot": str(screenshot),
+                }
             return {
                 "status": "review_required",
                 "submitted": False,
@@ -1457,11 +1557,13 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
                 }
 
             page_text = driver.find_element("tag name", "body").text[:5000]
+            limit_reason = _platform_limit_reason(page_text)
             return {
                 "status": "review_required",
                 "submitted": False,
                 "platform": "mostaql",
-                "reason": "Mostaql bid form was not found on the project page.",
+                "reason": limit_reason or "Mostaql bid form was not found on the project page.",
+                **({"platform_limit_reached": True} if limit_reason else {}),
                 "page_title": driver.title,
                 "final_url": driver.current_url,
                 "page_text": page_text,
@@ -1571,26 +1673,29 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
 
         proposal_screenshot = _capture_proposal_screenshot(driver, form, "mostaql")
 
-        validation = driver.execute_script("""
-            const form = document.querySelector('form#project__bid');
-            const ids = ['bid__period', 'bid__cost', 'bid__details'];
+        def read_validation():
+            return driver.execute_script("""
+                const form = document.querySelector('form#project__bid');
+                const ids = ['bid__period', 'bid__cost', 'bid__details'];
 
-            return {
-                browserValid: form.checkValidity(),
-                fields: ids.map(id => {
-                    const el = document.getElementById(id);
-                    return {
-                        id,
-                        valueLength: el.value.length,
-                        valid: el.checkValidity(),
-                        message: el.validationMessage
-                    };
-                }),
-                calculatedNetAmount:
-                    document.querySelector('#bid__realCost')?.value || null,
-                submitButtonClicked: false
-            };
-        """)
+                return {
+                    browserValid: form ? form.checkValidity() : false,
+                    fields: ids.map(id => {
+                        const el = document.getElementById(id);
+                        return {
+                            id,
+                            valueLength: el ? el.value.length : 0,
+                            valid: el ? el.checkValidity() : false,
+                            message: el ? el.validationMessage : 'missing field'
+                        };
+                    }),
+                    calculatedNetAmount:
+                        document.querySelector('#bid__realCost')?.value || null,
+                    submitButtonClicked: false
+                };
+            """)
+
+        validation = read_validation()
 
         if not submit:
             screenshot = SCREENSHOTS / "mostaql-offer-dry-run.png"
@@ -1663,6 +1768,84 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
         )
         validation["submitButtonClicked"] = True
 
+        # Mostaql recalculates the minimum offer from the live bids, so a price
+        # that was valid when the page loaded can be rejected seconds later.
+        # The rejection re-renders the form and states the new minimum, which
+        # means nothing was submitted. Retry at that exact price (at most
+        # twice). A successful submit removes the form, so this cannot create
+        # a duplicate bid.
+        retry_count = 0
+        retry_error = ""
+        server_required_min = _mostaql_required_min((state or {}).get("text") or "")
+        while (
+            not submitted
+            and server_required_min is not None
+            and (state or {}).get("formVisible")
+            and retry_count < 2
+            and server_required_min > effective_cost
+        ):
+            retry_count += 1
+            effective_cost = server_required_min
+            floor_adjusted = True
+            try:
+                form = WebDriverWait(driver, 12).until(
+                    lambda d: d.find_element("css selector", "form#project__bid")
+                )
+                period_el = form.find_element("id", "bid__period")
+                cost_el = form.find_element("id", "bid__cost")
+                details_el = form.find_element("id", "bid__details")
+
+                period_el.clear()
+                period_el.send_keys(str(period))
+                cost_el.clear()
+                cost_el.send_keys(str(effective_cost))
+                details_el.clear()
+                details_el.send_keys(proposal)
+                driver.execute_script("""
+                    for (const id of ['bid__period', 'bid__cost', 'bid__details']) {
+                        const el = document.getElementById(id);
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                """)
+
+                if attachments and _uploaded_file_count(driver, form) >= len(attachments):
+                    # The re-rendered page kept the finished uploads.
+                    pass
+                else:
+                    attachment_info = _attach_files(driver, form, attachments or [])
+                    if attachments and (
+                        attachment_info.get("supported") is not True
+                        or attachment_info.get("uploaded", 0) < len(attachments)
+                    ):
+                        break
+
+                new_proposal_screenshot = _capture_proposal_screenshot(
+                    driver, form, "mostaql"
+                )
+                if proposal_screenshot and new_proposal_screenshot != proposal_screenshot:
+                    try:
+                        Path(proposal_screenshot).unlink()
+                    except Exception:
+                        pass
+                if new_proposal_screenshot:
+                    proposal_screenshot = new_proposal_screenshot
+
+                validation = read_validation()
+                if not validation.get("browserValid"):
+                    break
+
+                submitted, confirmation, alerts, state = _submit_and_confirm(
+                    driver, "#bid__submit"
+                )
+                validation["submitButtonClicked"] = True
+                server_required_min = _mostaql_required_min(
+                    (state or {}).get("text") or ""
+                )
+            except Exception as exc:
+                retry_error = str(exc)
+                break
+
         page_title, final_url = _safe_page_info(driver)
         screenshot = SCREENSHOTS / (
             "mostaql-submitted.png" if submitted else "mostaql-submit-failed.png"
@@ -1685,6 +1868,8 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
             "requested_cost": requested_cost,
             "cost_usd": effective_cost,
             "minimum_cost": minimum_cost,
+            "server_required_minimum": server_required_min,
+            "retry_count": retry_count,
             "floor_adjusted": floor_adjusted,
             "validation": validation,
             "proposal_screenshot": proposal_screenshot,
@@ -1695,6 +1880,8 @@ def prepare_mostaql_offer(url, period, cost, proposal, submit=False, attachments
                 else "The bid was not confirmed; review the evidence before retrying."
             ),
         }
+        if retry_error:
+            result["retry_error"] = retry_error
         if not submitted:
             result["page_text"] = (state.get("text") or "")[:3000]
         return result

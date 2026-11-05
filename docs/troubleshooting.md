@@ -80,6 +80,22 @@ Each platform clamps to its own minimum, so a $10 bid can be submitted as $25:
 
 If the floor looks wrong, the project page is the source of truth — read the minimum from the form, not from the budget text.
 
+**Mostaql raises the floor while the project is live.** The platform recalculates the minimum from the bids already submitted, so the median can rise between page load and submit. The server rejects the post with `يجب أن لا تقل قيمة الحقل قيمة العرض عن 60` and re-renders the form; nothing was submitted. The service retries at the stated price automatically (at most twice) and reports `server_required_minimum` / `retry_count`. If the retry still fails, the alert shows the last minimum and `submit_failed`.
+
+## The model declined a job
+
+A `review_required` result with an empty proposal can be a deliberate decision, not a parse failure. The parser honours the model's status and keeps its `reason` (for example, a skills mismatch), so the Telegram alert explains why nothing was bid. Only an `eligible` answer with missing proposal/cost/period is reported as invalid output.
+
+## The offer form is missing
+
+A missing form is not automatically a closed project. Check the page text for:
+
+- **`أكثر من 10 عروض على مشاريع مفتوحة آخر 14 يوم`** — Nafezly's account cap. The account already holds more than ten open offers from the last fortnight, so the platform replaces the form with this notice. Nothing can be bid until one of those offers is awarded, rejected, or the project closes. The backend reports `review_required` with `platform_limit_reached: true` and a reason that names the cap, so the alert points at the account rather than the project. This is not retryable in code.
+- **`مغلق` / `مكتمل` / `قيد التنفيذ`** — the project is simply not open.
+- **already-bid markers** (`عدد العروض` on Kafiil, an absent form plus listed bids on Mostaql) — an offer already exists.
+
+A closed project or an account cap will keep failing until the state changes; retrying the same job just burns an AI call and a screenshot.
+
 ## n8n side
 
 **`$env` expressions are empty** — set `N8N_BLOCK_ENV_ACCESS_IN_NODE=false` and restart n8n. Confirm nothing else is shadowing the name: `docker exec <n8n> env | grep LOKI`.
